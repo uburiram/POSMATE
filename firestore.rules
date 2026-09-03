@@ -1,0 +1,164 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- Helper functions ----------
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // อ่านเอกสาร users/{uid} ของร้านนี้ เพื่อดู role ของบัญชีหลัก
+    function userDoc(shopId) {
+      return get(/databases/$(database)/documents/shops/$(shopId)/users/$(request.auth.uid));
+    }
+
+    function isShopMember(shopId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/shops/$(shopId)/users/$(request.auth.uid)) &&
+        userDoc(shopId).data.status == 'ACTIVE';
+    }
+
+    function role(shopId) {
+      return userDoc(shopId).data.role;
+    }
+
+    function isAdmin(shopId) {
+      return isShopMember(shopId) && role(shopId) == 'ADMIN';
+    }
+
+    function isManagerUp(shopId) {
+      return isShopMember(shopId) && role(shopId) in ['ADMIN', 'MANAGER'];
+    }
+
+    function isStaff(shopId) {
+      // ADMIN, MANAGER, CASHIER — ทุกคนที่ล็อกอินและ active ในร้านนี้
+      return isShopMember(shopId) && role(shopId) in ['ADMIN', 'MANAGER', 'CASHIER'];
+    }
+
+    // ---------- shops/{shopId} ----------
+    match /shops/{shopId} {
+      allow read: if isShopMember(shopId);
+      allow write: if isAdmin(shopId);
+
+      // ---- users (uid -> role/employeeId mapping) ----
+      // เขียนได้เฉพาะ ADMIN (ผูกบัญชี Firebase ใหม่เข้ากับร้าน)
+      match /users/{uid} {
+        allow read: if isShopMember(shopId);
+        allow write: if isAdmin(shopId);
+      }
+
+      // ---- employees ----
+      match /employees/{employeeId} {
+        allow read: if isStaff(shopId);
+        // pinHash ต้องไม่ถูกอ่านตรงจาก client ได้ในทางปฏิบัติ —
+        // แนะนำแยกเก็บ pinHash ไว้ใน collection ที่ client ไม่มีสิทธิ์ read เลย
+        // (ดู employeePins ด้านล่าง) เอกสารนี้เก็บเฉพาะข้อมูลแสดงผล
+        allow write: if isAdmin(shopId);
+      }
+
+      // เก็บ pinHash แยกต่างหาก client ไม่มีสิทธิ์อ่าน/เขียนเลย
+      // ตรวจสอบ PIN ทำผ่าน Cloud Function (verifyEmployeePin) เท่านั้น
+      match /employeePins/{employeeId} {
+        allow read, write: if false;
+      }
+
+      // ---- categories ----
+      match /categories/{categoryId} {
+        allow read: if isStaff(shopId);
+        allow write: if isManagerUp(shopId);
+      }
+
+      // ---- products ----
+      match /products/{productId} {
+        allow read: if isStaff(shopId);
+        allow write: if isManagerUp(shopId);
+      }
+
+      // ---- sales ----
+      // สร้างได้จาก staff ทุก role (การขาย), แต่ "แก้ไข" หลังสร้างแล้ว
+      // (เช่นเปลี่ยน status เป็น CANCELLED/REFUNDED) จำกัดที่ MANAGER ขึ้นไป
+      match /sales/{saleId} {
+        allow read: if isStaff(shopId);
+        allow create: if isStaff(shopId)
+          && request.resource.data.employeeId is string
+          && request.resource.data.status == 'COMPLETED';
+        allow update: if isManagerUp(shopId)
+          && request.resource.data.status in ['CANCELLED', 'REFUNDED'];
+        allow delete: if false; // ห้ามลบถาวรเด็ดขาด (ข้อ 18, 44)
+      }
+
+      // ---- payments ----
+      match /payments/{paymentId} {
+        allow read: if isStaff(shopId);
+        allow create: if isStaff(shopId);
+        allow update: if isStaff(shopId)
+          && request.resource.data.status in ['PAID', 'CANCELLED'];
+        allow delete: if false;
+      }
+
+      // ---- receipts ----
+      match /receipts/{receiptId} {
+        allow read: if isStaff(shopId);
+        allow create: if isStaff(shopId);
+        allow update, delete: if false; // ใบเสร็จเป็น snapshot ห้ามแก้ย้อนหลัง
+      }
+
+      // ---- inventoryTransactions (Stock Movement log) ----
+      // เขียนได้เฉพาะผ่าน flow ที่ควบคุม (checkout, stock-in, adjust)
+      // แต่ client ยังต้องเขียนได้ตรงในกรณี Firestore Transaction ฝั่ง client
+      // จึงจำกัดที่ MANAGER ขึ้นไป ยกเว้น type SALE ที่มาจาก staff ทุกคน (การขายปกติ)
+      match /inventoryTransactions/{txnId} {
+        allow read: if isStaff(shopId);
+        allow create: if isStaff(shopId)
+          && (request.resource.data.type == 'SALE' || isManagerUp(shopId));
+        allow update, delete: if false; // log ห้ามแก้/ลบ
+      }
+
+      // ---- stockAdjustments ----
+      match /stockAdjustments/{adjustId} {
+        allow read: if isManagerUp(shopId);
+        allow create: if isManagerUp(shopId)
+          && request.resource.data.reason is string
+          && request.resource.data.reason.size() > 0;
+        allow update, delete: if false;
+      }
+
+      // ---- refunds ----
+      match /refunds/{refundId} {
+        allow read: if isManagerUp(shopId);
+        allow create: if isManagerUp(shopId);
+        allow update, delete: if false;
+      }
+
+      // ---- shifts ----
+      match /shifts/{shiftId} {
+        allow read: if isStaff(shopId);
+        allow create: if isStaff(shopId);
+        allow update: if isStaff(shopId)
+          && resource.data.employeeId == request.resource.data.employeeId;
+        allow delete: if false;
+      }
+
+      // ---- auditLogs ----
+      // ห้าม client เขียนตรงเด็ดขาด (ข้อ 33) — เขียนได้จาก Cloud Function
+      // (Admin SDK) เท่านั้น ซึ่งไม่ผ่าน Security Rules อยู่แล้ว
+      match /auditLogs/{logId} {
+        allow read: if isAdmin(shopId);
+        allow write: if false;
+      }
+
+      // ---- settings ----
+      match /settings/{settingId} {
+        allow read: if isStaff(shopId);
+        allow write: if isAdmin(shopId);
+      }
+    }
+
+    // ปิดกั้นทุกอย่างที่ไม่ตรงกับ path ด้านบนโดย default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
