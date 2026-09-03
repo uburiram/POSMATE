@@ -5,12 +5,12 @@
 // Firebase Console > Project Settings > General > Your apps > Web app > SDK setup
 
 export const firebaseConfig = {
-  apiKey: "REPLACE_WITH_YOUR_API_KEY",
+  apiKey: "AIzaSyAu7d-BxDLGSj9AQZNwF_VoDi9eblG3jjk",
   authDomain: "posmate-4f87b.firebaseapp.com",
   projectId: "posmate-4f87b",
-  storageBucket: "posmate-4f87b.appspot.com",
-  messagingSenderId: "REPLACE_WITH_SENDER_ID",
-  appId: "REPLACE_WITH_APP_ID",
+  storageBucket: "posmate-4f87b.firebasestorage.app",
+  messagingSenderId: "260156122268",
+  appId: "1:260156122268:web:734e2fc609a59d62b0b959",
 };
 
 // shopId เริ่มต้นสำหรับ V1 (ร้านเดียว)
