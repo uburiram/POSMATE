@@ -1,0 +1,143 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function getRole() {
+      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? userDoc().role
+        : null;
+    }
+
+    function getShopIdFromUser() {
+      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? userDoc().shopId
+        : null;
+    }
+
+    function isAdmin() {
+      return getRole() == 'ADMIN';
+    }
+
+    function isManagerOrAbove() {
+      return getRole() in ['ADMIN', 'MANAGER'];
+    }
+
+    function isCashierOrAbove() {
+      return getRole() in ['ADMIN', 'MANAGER', 'CASHIER'];
+    }
+
+    function sameShop(shopId) {
+      return isAuthenticated() && getShopIdFromUser() == shopId;
+    }
+
+    function isOwner(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
+    }
+
+    match /shops/{shopId} {
+      allow read: if sameShop(shopId);
+      allow create, update: if isAdmin() && sameShop(shopId);
+      allow delete: if false;
+    }
+
+    match /users/{uid} {
+      allow read: if isOwner(uid) || isManagerOrAbove();
+      allow create: if isOwner(uid) || isAdmin();
+      allow update: if isAdmin() ||
+        (isOwner(uid) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'shopId', 'active']));
+      allow delete: if false;
+    }
+
+    match /employees/{employeeId} {
+      allow read: if isCashierOrAbove() &&
+        (resource == null || sameShop(resource.data.shopId));
+      allow create: if isAdmin() && sameShop(request.resource.data.shopId);
+      allow update: if isAdmin() && sameShop(request.resource.data.shopId);
+      allow delete: if false;
+    }
+
+    match /categories/{categoryId} {
+      allow read: if isCashierOrAbove() && sameShop(resource.data.shopId);
+      allow create, update: if isManagerOrAbove() && sameShop(request.resource.data.shopId);
+      allow delete: if false;
+    }
+
+    match /products/{productId} {
+      allow read: if isCashierOrAbove() && sameShop(resource.data.shopId);
+      allow create, update: if isManagerOrAbove() && sameShop(request.resource.data.shopId);
+      allow delete: if false;
+    }
+
+    match /sales/{saleId} {
+      allow read: if isCashierOrAbove() && sameShop(resource.data.shopId);
+      allow create: if isCashierOrAbove()
+                   && sameShop(request.resource.data.shopId)
+                   && request.resource.data.status in ['COMPLETED', 'PENDING', 'CANCELLED', 'REFUNDED'];
+      allow update: if isManagerOrAbove() && sameShop(resource.data.shopId);
+      allow delete: if false;
+    }
+
+    match /payments/{paymentId} {
+      allow read: if isCashierOrAbove() && sameShop(resource.data.shopId);
+      allow create: if isCashierOrAbove() && sameShop(request.resource.data.shopId);
+      allow update: if isManagerOrAbove() && sameShop(resource.data.shopId);
+      allow delete: if false;
+    }
+
+    match /receipts/{receiptId} {
+      allow read: if isCashierOrAbove() && sameShop(resource.data.shopId);
+      allow create: if isCashierOrAbove() && sameShop(request.resource.data.shopId);
+      allow update, delete: if false;
+    }
+
+    match /inventoryTransactions/{txId} {
+      allow read: if isCashierOrAbove() &&
+        (resource == null || sameShop(resource.data.shopId));
+      allow create: if isCashierOrAbove() && sameShop(request.resource.data.shopId);
+      allow update, delete: if false;
+    }
+
+    match /stockAdjustments/{adjustId} {
+      allow read: if isManagerOrAbove() &&
+        (resource == null || sameShop(resource.data.shopId));
+      allow create: if isManagerOrAbove() && sameShop(request.resource.data.shopId);
+      allow update, delete: if false;
+    }
+
+    match /refunds/{refundId} {
+      allow read: if isManagerOrAbove() && sameShop(resource.data.shopId);
+      allow create: if isManagerOrAbove() && sameShop(request.resource.data.shopId);
+      allow update, delete: if false;
+    }
+
+    match /shifts/{shiftId} {
+      allow read: if isCashierOrAbove() && sameShop(resource.data.shopId);
+      allow create, update: if isCashierOrAbove() && sameShop(request.resource.data.shopId);
+      allow delete: if false;
+    }
+
+    match /auditLogs/{logId} {
+      allow read: if isManagerOrAbove() && sameShop(resource.data.shopId);
+      allow create: if isCashierOrAbove() && sameShop(request.resource.data.shopId);
+      allow update, delete: if false;
+    }
+
+    match /counters/{shopId} {
+      allow read: if sameShop(shopId);
+      allow write: if isCashierOrAbove() && sameShop(shopId);
+    }
+
+    match /settings/{shopId} {
+      allow read: if sameShop(shopId);
+      allow write: if isAdmin() && sameShop(shopId);
+    }
+  }
+}
