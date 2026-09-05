@@ -854,8 +854,16 @@ async function saveShopForm(oldShop) {
       action: 'UPDATE_SHOP',
       module: 'SETTINGS',
       targetId: shopId,
-      oldValue: { name: oldShop.name, promptPayId: oldShop.promptPayId },
-      newValue: { name: data.name, promptPayId: data.promptPayId }
+      oldValue: {
+        name: oldShop?.name ?? null,
+        promptPayId: oldShop?.promptPayId ?? null,
+        promptPayName: oldShop?.promptPayName ?? null
+      },
+      newValue: {
+        name: data.name,
+        promptPayId: data.promptPayId || null,
+        promptPayName: data.promptPayName || null
+      }
     });
     hideLoading();
     showToast('บันทึกข้อมูลร้านสำเร็จ', 'success');
