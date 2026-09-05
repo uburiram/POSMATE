@@ -1,0 +1,29 @@
+# Firebase
+.firebase/
+firebase-debug.log
+firebase-debug.*.log
+
+# Secrets / local config
+js/config.local.js
+.env
+.env.*
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+*.log
+
+# Node
+node_modules/
+package-lock.json
+
+# Build / temp
+dist/
+tmp/
+*.zip
+*.tar.gz
+
+offline-data/
