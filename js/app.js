@@ -609,7 +609,36 @@ async function renderEmployees() {
   }
 
   showLoading('โหลดรายชื่อพนักงาน...');
-  const list = await listEmployees(getCurrentShopId());
+  let list = [];
+  try {
+    list = await listEmployees(getCurrentShopId());
+  } catch (err) {
+    hideLoading();
+    console.error(err);
+    const msg = err?.message || String(err);
+    const needIndex = /requires an index|failed-precondition/i.test(msg);
+    pageContent.innerHTML = `
+      <div class="card">
+        <h2 style="font-size:1.15rem;margin-bottom:8px;">พนักงาน</h2>
+        <p class="text-danger" style="font-size:0.9rem;">
+          ${needIndex
+            ? 'ฐานข้อมูลกำลังเตรียม Index กรุณารอ 1–5 นาที แล้วรีเฟรชหน้านี้'
+            : 'โหลดรายชื่อพนักงานไม่สำเร็จ'}
+        </p>
+        ${needIndex ? `
+          <p class="text-muted" style="font-size:0.8rem;margin-top:8px;">
+            เปิด Firebase Console → Firestore → Indexes แล้วรอสถานะ Enabled
+          </p>
+          <a class="btn btn-outline btn-block mt-2" target="_blank" rel="noopener"
+             href="https://console.firebase.google.com/u/0/project/posmate-4f87b/firestore/indexes">
+            เปิดหน้า Indexes
+          </a>
+        ` : `<p class="text-muted" style="font-size:0.8rem;">${escapeHtml(msg)}</p>`}
+        <button class="btn btn-primary btn-block mt-2" id="btn-retry-emp">ลองใหม่</button>
+      </div>`;
+    $('#btn-retry-emp')?.addEventListener('click', () => renderEmployees());
+    return;
+  }
   hideLoading();
 
   pageContent.innerHTML = `

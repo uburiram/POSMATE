@@ -52,6 +52,21 @@ export function getStorageInstance() {
 
 export { serverTimestamp, writeBatch, runTransaction, onSnapshot, collection, doc, query, where, orderBy, limit };
 
+/** ลบ undefined ออกจาก object/array ก่อนเขียน Firestore (Firestore ไม่รับ undefined) */
+function stripUndefined(value) {
+  if (value === undefined) return null;
+  if (value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) {
+    return value.map(stripUndefined).filter(v => v !== undefined);
+  }
+  const out = {};
+  for (const [k, v] of Object.entries(value)) {
+    if (v === undefined) continue;
+    out[k] = stripUndefined(v);
+  }
+  return out;
+}
+
 // ---------- Shop ----------
 export async function getShop(shopId = DEFAULT_SHOP_ID) {
   const snap = await getDoc(doc(getDb(), 'shops', shopId));
@@ -60,11 +75,12 @@ export async function getShop(shopId = DEFAULT_SHOP_ID) {
 
 export async function saveShop(shopId, data) {
   const refDoc = doc(getDb(), 'shops', shopId);
-  await setDoc(refDoc, {
+  const clean = stripUndefined({
     ...data,
     shopId,
     updatedAt: serverTimestamp()
-  }, { merge: true });
+  });
+  await setDoc(refDoc, clean, { merge: true });
 }
 
 // ---------- Users ----------
@@ -74,21 +90,34 @@ export async function getUserProfile(uid) {
 }
 
 export async function saveUserProfile(uid, data) {
-  await setDoc(doc(getDb(), 'users', uid), {
+  const clean = stripUndefined({
     ...data,
     updatedAt: serverTimestamp()
-  }, { merge: true });
+  });
+  await setDoc(doc(getDb(), 'users', uid), clean, { merge: true });
 }
 
 // ---------- Employees ----------
 export async function listEmployees(shopId = DEFAULT_SHOP_ID) {
-  const q = query(
-    collection(getDb(), 'employees'),
-    where('shopId', '==', shopId),
-    orderBy('code')
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  try {
+    const q = query(
+      collection(getDb(), 'employees'),
+      where('shopId', '==', shopId),
+      orderBy('code')
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) {
+    // fallback เมื่อยังไม่มี composite index (shopId + code)
+    const q2 = query(
+      collection(getDb(), 'employees'),
+      where('shopId', '==', shopId)
+    );
+    const snap = await getDocs(q2);
+    const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    list.sort((a, b) => String(a.code || '').localeCompare(String(b.code || ''), 'th'));
+    return list;
+  }
 }
 
 export async function getEmployee(employeeId) {
@@ -111,10 +140,10 @@ export async function getEmployeeByCode(shopId, code) {
 
 export async function saveEmployee(employeeId, data) {
   const refDoc = doc(getDb(), 'employees', employeeId || generateId('emp'));
-  const payload = {
+  const payload = stripUndefined({
     ...data,
     updatedAt: serverTimestamp()
-  };
+  });
   if (!employeeId) {
     payload.createdAt = serverTimestamp();
   }
@@ -123,21 +152,6 @@ export async function saveEmployee(employeeId, data) {
 }
 
 // ---------- Audit Log ----------
-/** ลบ undefined ออกจาก object/array ก่อนเขียน Firestore (Firestore ไม่รับ undefined) */
-function stripUndefined(value) {
-  if (value === undefined) return null;
-  if (value === null || typeof value !== 'object') return value;
-  if (Array.isArray(value)) {
-    return value.map(stripUndefined).filter(v => v !== undefined);
-  }
-  const out = {};
-  for (const [k, v] of Object.entries(value)) {
-    if (v === undefined) continue;
-    out[k] = stripUndefined(v);
-  }
-  return out;
-}
-
 export async function writeAuditLog({
   shopId = DEFAULT_SHOP_ID,
   userId,
@@ -223,11 +237,11 @@ export async function getCategory(categoryId) {
 export async function saveCategory(categoryId, data) {
   const id = categoryId || generateId('cat');
   const refDoc = doc(getDb(), 'categories', id);
-  const payload = {
+  const payload = stripUndefined({
     ...data,
     categoryId: id,
     updatedAt: serverTimestamp()
-  };
+  });
   if (!categoryId) {
     payload.createdAt = serverTimestamp();
     payload.status = data.status || 'ACTIVE';
@@ -334,11 +348,11 @@ export async function getProductByBarcode(shopId, barcode) {
 export async function saveProduct(productId, data) {
   const id = productId || generateId('prd');
   const refDoc = doc(getDb(), 'products', id);
-  const payload = {
+  const payload = stripUndefined({
     ...data,
     productId: id,
     updatedAt: serverTimestamp()
-  };
+  });
   if (!productId) {
     payload.createdAt = serverTimestamp();
   }

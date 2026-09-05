@@ -19,9 +19,9 @@ import { DEFAULT_SHOP_ID } from './config.js';
 import { hashPin, verifyPin, showToast, showLoading, hideLoading } from './utils.js';
 
 let auth = null;
-let currentUser = null;
-let currentProfile = null;
-let currentEmployee = null;
+let currentUser = null;       // Firebase User
+let currentProfile = null;    // users/{uid}
+let currentEmployee = null;   // พนักงานที่กำลังใช้งาน (หลังใส่ PIN)
 
 const SESSION_KEY = 'posmate_session';
 
@@ -36,6 +36,7 @@ export function getAuthInstance() {
   return auth;
 }
 
+/** ฟังก์ชันรอ Auth state ครั้งแรก */
 export function waitForAuth() {
   return new Promise((resolve) => {
     const unsub = onAuthStateChanged(getAuthInstance(), (user) => {
@@ -45,24 +46,27 @@ export function waitForAuth() {
   });
 }
 
+/** Login ด้วย Email + Password */
 export async function loginWithEmail(email, password) {
   showLoading('กำลังเข้าสู่ระบบ...');
   try {
     const cred = await signInWithEmailAndPassword(getAuthInstance(), email.trim(), password);
     currentUser = cred.user;
 
+    // โหลด profile
     let profile = await getUserProfile(currentUser.uid);
     if (!profile) {
+      // ยังไม่มี profile → สร้างชั่วคราว (Admin ต้องตั้งค่า role ทีหลัง)
       profile = {
         uid: currentUser.uid,
         email: currentUser.email,
         displayName: currentUser.displayName || email.split('@')[0],
         role: 'CASHIER',
         shopId: DEFAULT_SHOP_ID,
-        active: true,
-        createdAt: new Date()
+        active: true
       };
-      await saveUserProfile(currentUser.uid, profile);
+      await saveUserProfile(currentUser.uid, { ...profile, createdAt: new Date() });
+      // หมายเหตุ: user คนแรกควรตั้ง role=ADMIN ใน Firestore Console
     }
 
     if (!profile.active) {
@@ -98,6 +102,7 @@ export async function loginWithEmail(email, password) {
   }
 }
 
+/** Logout */
 export async function logout() {
   if (currentUser) {
     try {
@@ -117,6 +122,7 @@ export async function logout() {
   clearSession();
 }
 
+/** โหลด session จาก localStorage (หลัง refresh) */
 export function loadSession() {
   try {
     const raw = localStorage.getItem(SESSION_KEY);
@@ -143,6 +149,7 @@ function clearSession() {
   localStorage.removeItem(SESSION_KEY);
 }
 
+/** ตั้งค่า current user/profile หลัง onAuthStateChanged */
 export async function setCurrentFromAuth(user) {
   currentUser = user;
   if (!user) {
@@ -152,6 +159,7 @@ export async function setCurrentFromAuth(user) {
     return null;
   }
   currentProfile = await getUserProfile(user.uid);
+  // restore employee จาก session ถ้ามี
   const sess = loadSession();
   if (sess?.employeeId) {
     currentEmployee = await getEmployee(sess.employeeId);
@@ -166,6 +174,7 @@ export function getCurrentEmployee() { return currentEmployee; }
 export function getCurrentRole() { return currentProfile?.role || 'CASHIER'; }
 export function getCurrentShopId() { return currentProfile?.shopId || DEFAULT_SHOP_ID; }
 
+/** ตรวจสอบสิทธิ์ */
 export function hasRole(...roles) {
   const r = getCurrentRole();
   return roles.includes(r);
@@ -176,6 +185,10 @@ export function canAccess(requiredRoles) {
   return hasRole(...requiredRoles);
 }
 
+/**
+ * Employee PIN Switch
+ * ใช้เมื่อมีหลายพนักงานใช้เครื่องเดียวกัน
+ */
 export async function switchEmployeeByPin(code, pin) {
   const shopId = getCurrentShopId();
   const emp = await getEmployeeByCode(shopId, code);
@@ -212,7 +225,10 @@ export function clearCurrentEmployee() {
   saveSession();
 }
 
+/** สร้าง user ใหม่ (Admin only — ใช้จากหน้าจัดการ) */
 export async function createAuthUser(email, password, profileData) {
+  // หมายเหตุ: การสร้าง user จาก client จะทำให้ session เปลี่ยนเป็น user ใหม่
+  // ใน production ควรใช้ Cloud Function + Admin SDK
   const cred = await createUserWithEmailAndPassword(getAuthInstance(), email, password);
   await saveUserProfile(cred.user.uid, {
     ...profileData,
@@ -220,5 +236,6 @@ export async function createAuthUser(email, password, profileData) {
     email,
     active: true
   });
+  // กลับไป user เดิม (ต้อง re-login)
   return cred.user;
 }
