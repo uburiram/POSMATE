@@ -74,13 +74,17 @@ function notifyConnectivity() {
   });
 }
 
+/** เรียกครั้งเดียวตอน boot */
 export function initOfflineListeners() {
   window.addEventListener('online', () => {
     notifyConnectivity();
+    // auto-sync
     syncPendingSales().catch(console.warn);
   });
   window.addEventListener('offline', () => notifyConnectivity());
 }
+
+// ---------- Product Cache ----------
 
 export async function cacheProducts(products) {
   if (!products?.length) return;
@@ -140,6 +144,7 @@ export async function searchCachedProducts(shopId, keyword) {
   );
 }
 
+/** ดึงสินค้าจาก Firestore แล้ว cache — เรียกตอน online */
 export async function refreshProductCache(shopId, listProductsFn) {
   if (!isOnline()) return { cached: 0, offline: true };
   try {
@@ -152,6 +157,12 @@ export async function refreshProductCache(shopId, listProductsFn) {
   }
 }
 
+// ---------- Pending Sales Queue ----------
+
+/**
+ * บันทึกการขายลงคิว offline
+ * payload = buildCheckoutPayload() + payment fields
+ */
 export async function enqueuePendingSale(record) {
   const db = await openDb();
   const item = {
@@ -237,6 +248,10 @@ export async function removeSyncedPending(olderThanMs = 7 * 24 * 3600 * 1000) {
   });
 }
 
+/**
+ * Sync คิวไป Firebase
+ * completeSaleFn = completeSale จาก payment.js
+ */
 export async function syncPendingSales(completeSaleFn) {
   if (!isOnline() || syncing) return { synced: 0, failed: 0, skipped: true };
   if (!completeSaleFn) return { synced: 0, failed: 0, error: 'no completeSaleFn' };
@@ -262,6 +277,7 @@ export async function syncPendingSales(completeSaleFn) {
         synced++;
       } catch (err) {
         const msg = err.message || String(err);
+        // ถ้าซ้ำแล้ว ถือว่า sync แล้ว
         if (msg.includes('ป้องกันซ้ำ') || msg.includes('ถูกบันทึก')) {
           await markPendingSynced(item.transactionId);
           synced++;

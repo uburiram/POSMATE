@@ -125,12 +125,16 @@ export function setDiscount(type, value) {
   } else {
     discount = { type: 'NONE', value: 0 };
   }
+  // ป้องกันส่วนลดเกินยอด
   const { subtotal, discountAmount } = calcTotals();
   if (discountAmount > subtotal) {
     discount = { type: 'AMOUNT', value: subtotal };
   }
 }
 
+/**
+ * สแกน barcode → หาสินค้า → เพิ่มตะกร้า
+ */
 export async function scanAndAdd(barcode) {
   if (!barcode || scannerBusy) return null;
   scannerBusy = true;
@@ -162,6 +166,9 @@ export async function scanAndAdd(barcode) {
   }
 }
 
+/**
+ * โหลด html5-qrcode จาก CDN (ครั้งเดียว)
+ */
 function loadScannerLib() {
   return new Promise((resolve, reject) => {
     if (window.Html5Qrcode) {
@@ -176,6 +183,11 @@ function loadScannerLib() {
   });
 }
 
+/**
+ * เริ่มสแกนด้วยกล้อง
+ * @param {string} elementId - id ของ div ที่จะใส่ scanner
+ * @param {function} onDetected - callback(barcode)
+ */
 export async function startScanner(elementId, onDetected) {
   await stopScanner();
   const Html5Qrcode = await loadScannerLib();
@@ -194,6 +206,7 @@ export async function startScanner(elementId, onDetected) {
     startConfig,
     async (decodedText) => {
       if (scannerBusy) return;
+      // กันสแกนซ้ำเร็วเกินไป
       scannerBusy = true;
       try {
         if (onDetected) await onDetected(decodedText);
@@ -209,6 +222,7 @@ export async function stopScanner() {
   if (scannerInstance) {
     try {
       const state = scannerInstance.getState?.();
+      // 2 = SCANNING
       if (state === 2 || !state) {
         await scannerInstance.stop();
       }
@@ -221,6 +235,9 @@ export async function stopScanner() {
   scannerBusy = false;
 }
 
+/**
+ * ค้นหาสินค้าสำหรับ POS
+ */
 export async function searchProductsForPos(keyword, limitCount = 30) {
   const shopId = getCurrentShopId();
   if (!isOnline()) {
@@ -246,6 +263,9 @@ export async function searchProductsForPos(keyword, limitCount = 30) {
   }
 }
 
+/**
+ * เตรียมข้อมูลสำหรับ checkout (Phase 5 จะใช้)
+ */
 export function buildCheckoutPayload() {
   const emp = getCurrentEmployee();
   const totals = calcTotals();
