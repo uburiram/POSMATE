@@ -79,7 +79,8 @@ export function showLoading(text = 'กำลังโหลด...') {
     el.innerHTML = `<div class="loading-box"><div class="spinner"></div><p id="loading-text">${text}</p></div>`;
     document.body.appendChild(el);
   } else {
-    document.getElementById('loading-text').textContent = text;
+    const t = document.getElementById('loading-text');
+    if (t) t.textContent = text;
   }
   el.classList.add('active');
 }
@@ -93,10 +94,10 @@ export function hideLoading() {
 export function escapeHtml(str) {
   if (!str) return '';
   return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
+    .replace(/&/g, '&')
+    .replace(/</g, '<')
+    .replace(/>/g, '>')
+    .replace(/"/g, '"')
     .replace(/'/g, '&#39;');
 }
 
@@ -178,4 +179,39 @@ export function movementTypeLabel(type) {
     INTERNAL: 'ใช้ในร้าน'
   };
   return map[type] || type || '-';
+}
+
+/** ตรวจว่าเป็น error เรื่อง Firestore composite index */
+export function isFirestoreIndexError(err) {
+  const msg = err?.message || String(err || '');
+  return /requires an index|failed-precondition|The query requires an index/i.test(msg);
+}
+
+/** สร้าง HTML ข้อความ error ที่อ่านง่าย (มือถือ) */
+export function firestoreErrorHtml(err, { title = 'โหลดข้อมูลไม่สำเร็จ', retryId = 'btn-retry-page' } = {}) {
+  const msg = err?.message || String(err || '');
+  const needIndex = isFirestoreIndexError(err);
+  if (needIndex) {
+    return `
+      <div class="card">
+        <h2 style="font-size:1.1rem;margin-bottom:8px;">${title}</h2>
+        <p class="text-danger" style="font-size:0.9rem;">
+          ฐานข้อมูลกำลังเตรียม Index กรุณารอ 1–5 นาที แล้วรีเฟรช
+        </p>
+        <p class="text-muted" style="font-size:0.8rem;margin-top:8px;">
+          หรือเปิด Firebase Console → Firestore → Indexes รอสถานะ Enabled
+        </p>
+        <a class="btn btn-outline btn-block mt-2" target="_blank" rel="noopener"
+           href="https://console.firebase.google.com/u/0/project/posmate-4f87b/firestore/indexes">
+          เปิดหน้า Indexes
+        </a>
+        <button class="btn btn-primary btn-block mt-2" id="${retryId}">ลองใหม่</button>
+      </div>`;
+  }
+  return `
+    <div class="card">
+      <h2 style="font-size:1.1rem;margin-bottom:8px;">${title}</h2>
+      <p class="text-danger" style="font-size:0.9rem;">${escapeHtml(msg)}</p>
+      <button class="btn btn-primary btn-block mt-2" id="${retryId}">ลองใหม่</button>
+    </div>`;
 }
