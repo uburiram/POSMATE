@@ -17,7 +17,8 @@ import {
 } from './db.js';
 import {
   showToast, showLoading, hideLoading, escapeHtml, formatDateTime, formatMoney,
-  hashPin, generateId, compressImage, productStatusLabel, movementTypeLabel, debounce
+  hashPin, generateId, compressImage, productStatusLabel, movementTypeLabel, debounce,
+  isFirestoreIndexError, firestoreErrorHtml
 } from './utils.js';
 import { DEFAULT_SHOP_ID, APP_VERSION } from './config.js';
 import {
@@ -214,7 +215,9 @@ async function renderPage(page) {
     }
   } catch (err) {
     console.error(err);
-    pageContent.innerHTML = `<div class="card"><p class="text-danger">เกิดข้อผิดพลาด: ${escapeHtml(err.message)}</p></div>`;
+    hideLoading();
+    pageContent.innerHTML = firestoreErrorHtml(err, { title: 'เกิดข้อผิดพลาด', retryId: 'btn-retry-page' });
+    $('#btn-retry-page')?.addEventListener('click', () => renderPage(currentPage));
   }
 }
 
@@ -1691,14 +1694,24 @@ async function renderProducts() {
 
   showLoading('โหลดสินค้า...');
   const shopId = getCurrentShopId();
-  const [products, categories] = await Promise.all([
-    listProducts(shopId, {
-      status: productFilter.status,
-      categoryId: productFilter.categoryId || undefined,
-      search: productFilter.search || undefined
-    }),
-    listCategories(shopId)
-  ]);
+  let products = [];
+  let categories = [];
+  try {
+    [products, categories] = await Promise.all([
+      listProducts(shopId, {
+        status: productFilter.status,
+        categoryId: productFilter.categoryId || null,
+        search: productFilter.search || null
+      }),
+      listCategories(shopId)
+    ]);
+  } catch (err) {
+    hideLoading();
+    console.error(err);
+    pageContent.innerHTML = firestoreErrorHtml(err, { title: 'สินค้า', retryId: 'btn-retry-products' });
+    $('#btn-retry-products')?.addEventListener('click', () => renderProducts());
+    return;
+  }
   hideLoading();
 
   const catMap = {};
@@ -2275,7 +2288,16 @@ async function openStockHistory(productId) {
 // ---------- Categories ----------
 async function renderCategories() {
   showLoading();
-  const categories = await listCategories(getCurrentShopId());
+  let categories = [];
+  try {
+    categories = await listCategories(getCurrentShopId());
+  } catch (err) {
+    hideLoading();
+    console.error(err);
+    pageContent.innerHTML = firestoreErrorHtml(err, { title: 'หมวดหมู่', retryId: 'btn-retry-cat' });
+    $('#btn-retry-cat')?.addEventListener('click', () => renderCategories());
+    return;
+  }
   hideLoading();
 
   pageContent.innerHTML = `
@@ -2444,7 +2466,9 @@ async function renderSalesHistory() {
     });
   } catch (err) {
     hideLoading();
-    pageContent.innerHTML = `<div class="card"><p class="text-danger">${escapeHtml(err.message)}</p></div>`;
+    console.error(err);
+    pageContent.innerHTML = firestoreErrorHtml(err, { title: 'ประวัติการขาย', retryId: 'btn-retry-hist' });
+    $('#btn-retry-hist')?.addEventListener('click', () => renderSalesHistory());
     return;
   }
   hideLoading();
