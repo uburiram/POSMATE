@@ -6,6 +6,7 @@ service firebase.storage {
       return request.auth != null;
     }
 
+    // Shop logos
     match /shops/{shopId}/logo/{fileName} {
       allow read: if true;
       allow write: if isAuthenticated()
@@ -13,6 +14,7 @@ service firebase.storage {
                    && request.resource.contentType.matches('image/.*');
     }
 
+    // Product images — path: shops/{shopId}/products/{productId}.jpg
     match /shops/{shopId}/products/{fileName} {
       allow read: if true;
       allow write: if isAuthenticated()
@@ -20,6 +22,7 @@ service firebase.storage {
                    && request.resource.contentType.matches('image/.*');
     }
 
+    // Deny everything else
     match /{allPaths=**} {
       allow read, write: if false;
     }
