@@ -7,16 +7,18 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <title>POSMATE — เข้าสู่ระบบ</title>
-  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/main.css?v=1.0.1">
 </head>
 <body>
   <div id="app">
+    <!-- Login Screen -->
     <div id="login-screen" class="login-page">
       <div class="login-card">
         <div class="login-logo">
           <h1>POSMATE</h1>
           <p>ระบบ POS สำหรับร้านค้าขนาดเล็ก–กลาง</p>
         </div>
+
         <form id="login-form">
           <div class="form-group">
             <label for="email">อีเมล</label>
@@ -30,11 +32,14 @@
             เข้าสู่ระบบ
           </button>
         </form>
+
         <p class="text-center text-muted mt-2" style="font-size:0.8rem;">
-          POSMATE v1.0
+          POSMATE v1.0.1
         </p>
       </div>
     </div>
+
+    <!-- Main App (hidden until login) -->
     <div id="main-app" class="app hidden">
       <header class="header">
         <div>
@@ -45,17 +50,41 @@
           ออก
         </button>
       </header>
-      <main class="main" id="page-content"></main>
+
+      <main class="main" id="page-content">
+        <!-- Dashboard content injected by JS -->
+      </main>
+
       <nav class="bottom-nav" id="bottom-nav">
-        <a href="#dashboard" data-page="dashboard" class="active"><span class="icon">🏠</span>หน้าหลัก</a>
-        <a href="#pos" data-page="pos"><span class="icon">🛒</span>ขาย</a>
-        <a href="#history" data-page="history"><span class="icon">📋</span>ประวัติ</a>
-        <a href="#products" data-page="products"><span class="icon">📦</span>สินค้า</a>
-        <a href="#employees" data-page="employees"><span class="icon">👥</span>พนักงาน</a>
-        <a href="#settings" data-page="settings"><span class="icon">⚙️</span>ตั้งค่า</a>
+        <a href="#dashboard" data-page="dashboard" class="active">
+          <span class="icon">🏠</span>
+          หน้าหลัก
+        </a>
+        <a href="#pos" data-page="pos">
+          <span class="icon">🛒</span>
+          ขาย
+        </a>
+        <a href="#history" data-page="history">
+          <span class="icon">📋</span>
+          ประวัติ
+        </a>
+        <a href="#products" data-page="products">
+          <span class="icon">📦</span>
+          สินค้า
+        </a>
+        <a href="#employees" data-page="employees">
+          <span class="icon">👥</span>
+          พนักงาน
+        </a>
+        <a href="#settings" data-page="settings">
+          <span class="icon">⚙️</span>
+          ตั้งค่า
+        </a>
       </nav>
     </div>
   </div>
+
+  <!-- PIN Switch Modal -->
   <div class="modal-overlay" id="pin-modal">
     <div class="modal">
       <h2>เลือกพนักงาน</h2>
@@ -71,6 +100,7 @@
       <button class="btn btn-outline btn-block mt-1" id="btn-close-pin">ยกเลิก</button>
     </div>
   </div>
-  <script type="module" src="js/app.js"></script>
+
+  <script type="module" src="js/app.js?v=1.0.1"></script>
 </body>
 </html>
