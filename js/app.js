@@ -245,6 +245,28 @@ async function renderDashboard() {
   } catch (e) {
     console.warn(e);
   }
+
+  // คำแนะนำตั้งค่าร้านครั้งแรก
+  let setupHints = [];
+  try {
+    if (!shop?.name || shop.name === 'ร้านค้า' || shop.name === 'ร้านของฉัน') {
+      setupHints.push({ page: 'settings', text: 'ตั้งชื่อร้านและที่อยู่' });
+    }
+    if (!shop?.promptPayId) {
+      setupHints.push({ page: 'settings', text: 'ตั้งค่า PromptPay (ถ้ารับโอน)' });
+    }
+    const emps = await listEmployees(shopId).catch(() => []);
+    if (!emps.length) {
+      setupHints.push({ page: 'employees', text: 'เพิ่มพนักงานและตั้ง PIN' });
+    }
+    const prods = await listProducts(shopId, { limitCount: 5 }).catch(() => []);
+    if (!prods.length) {
+      setupHints.push({ page: 'products', text: 'เพิ่มสินค้าอย่างน้อย 1 รายการ' });
+    }
+  } catch (e) {
+    console.warn('setupHints', e);
+  }
+
   hideLoading();
 
   const s = stats || {
@@ -285,6 +307,21 @@ async function renderDashboard() {
         <button class="btn btn-outline btn-sm mt-1" id="btn-open-pin">เปลี่ยนพนักงาน</button>
       `}
     </div>
+
+    ${setupHints.length ? `
+      <div class="card mb-2" style="border-left:4px solid var(--primary);">
+        <h3 style="font-size:0.95rem;margin-bottom:8px;">เริ่มต้นใช้งาน</h3>
+        <ol style="margin:0;padding-left:20px;font-size:0.9rem;">
+          ${setupHints.map(h => `<li style="margin-bottom:6px;">${escapeHtml(h.text)}</li>`).join('')}
+        </ol>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">
+          ${[...new Map(setupHints.map(h => [h.page, h])).values()].map(h => {
+            const labels = { settings: 'ตั้งค่า', employees: 'พนักงาน', products: 'สินค้า' };
+            return `<button class="btn btn-outline btn-sm" data-goto="${h.page}">${labels[h.page] || h.page}</button>`;
+          }).join('')}
+        </div>
+      </div>
+    ` : ''}
 
     <div class="card mb-2">
       <div class="flex-between" style="margin-bottom:10px;">
