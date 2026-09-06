@@ -13,5 +13,8 @@ export const firebaseConfig = {
   measurementId: "G-EKG31FMP68"
 };
 
+// Default shopId สำหรับ V1 (ร้านเดียว)
 export const DEFAULT_SHOP_ID = "shop_main";
-export const APP_VERSION = "1.0.0";
+
+// App version
+export const APP_VERSION = "1.0.1";
