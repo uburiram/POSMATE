@@ -79,8 +79,7 @@ export function showLoading(text = 'กำลังโหลด...') {
     el.innerHTML = `<div class="loading-box"><div class="spinner"></div><p id="loading-text">${text}</p></div>`;
     document.body.appendChild(el);
   } else {
-    const t = document.getElementById('loading-text');
-    if (t) t.textContent = text;
+    document.getElementById('loading-text').textContent = text;
   }
   el.classList.add('active');
 }
@@ -94,10 +93,10 @@ export function hideLoading() {
 export function escapeHtml(str) {
   if (!str) return '';
   return String(str)
-    .replace(/&/g, '&')
-    .replace(/</g, '<')
-    .replace(/>/g, '>')
-    .replace(/"/g, '"')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
 
@@ -180,6 +179,7 @@ export function movementTypeLabel(type) {
   };
   return map[type] || type || '-';
 }
+
 
 /** ตรวจว่าเป็น error เรื่อง Firestore composite index */
 export function isFirestoreIndexError(err) {
