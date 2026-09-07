@@ -71,6 +71,7 @@ export async function completeSale({
     shopId,
     transactionId: payload.transactionId,
     receiptNo,
+    shiftId: payload.shiftId || null,
     employeeId,
     employeeName,
     status: 'COMPLETED',

@@ -981,6 +981,36 @@ async function renderPos() {
     return;
   }
 
+  // บังคับเปิดกะก่อนขาย — ปิดกะแล้วขายไม่ได้
+  let openShiftData = null;
+  try {
+    showLoading('ตรวจสอบกะ...');
+    openShiftData = await getOpenShift(getCurrentShopId());
+  } catch (e) {
+    console.warn(e);
+  } finally {
+    hideLoading();
+  }
+  if (!openShiftData) {
+    pageContent.innerHTML = `
+      <div class="card text-center">
+        <div style="font-size:2.5rem;margin-bottom:12px;">🕐</div>
+        <h2 style="font-size:1.1rem;">ยังไม่ได้เปิดกะ</h2>
+        <p class="text-muted mt-1" style="font-size:0.9rem;">
+          ต้องเปิดกะก่อนจึงจะขายสินค้าได้<br>
+          เมื่อปิดกะแล้วจะขายไม่ได้จนกว่าจะเปิดกะใหม่
+        </p>
+        <button class="btn btn-primary btn-block btn-lg mt-2" id="btn-pos-open-shift">เปิดกะ</button>
+        <button class="btn btn-outline btn-block mt-1" id="btn-pos-back-dash">กลับหน้าหลัก</button>
+      </div>
+    `;
+    $('#btn-pos-open-shift')?.addEventListener('click', () => openShiftForm());
+    $('#btn-pos-back-dash')?.addEventListener('click', () => navigate('dashboard'));
+    return;
+  }
+  // เก็บ shift ปัจจุบันไว้ให้ checkout ใช้
+  window.__posOpenShiftId = openShiftData.id || openShiftData.shiftId || null;
+
   if (posMode === 'scan') {
     await renderPosScan();
     return;
@@ -1141,28 +1171,65 @@ function renderPosCart() {
 }
 
 async function renderPosScan() {
+  function buildScanCartListHtml() {
+    const cart = getCart();
+    if (!cart.length) {
+      return `<div class="text-muted text-center" style="padding:14px 8px;font-size:0.85rem;">
+        ยังไม่มีสินค้า — สแกนบาร์โค้ดด้านบน
+      </div>`;
+    }
+    return cart.map(item => `
+      <div class="scan-cart-row" data-id="${escapeHtml(item.productId)}"
+           style="display:flex;align-items:center;gap:8px;padding:10px 4px;border-bottom:1px solid var(--border,#e5e7eb);">
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:600;font-size:0.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+            ${escapeHtml(item.name)}
+          </div>
+          <div class="text-muted" style="font-size:0.78rem;">
+            ฿${formatMoney(item.unitPrice)} × ${item.quantity}
+          </div>
+        </div>
+        <strong style="font-size:0.95rem;white-space:nowrap;">฿${formatMoney(item.lineTotal)}</strong>
+      </div>
+    `).join('');
+  }
+
+  function refreshScanCartUI() {
+    const t = calcTotals();
+    const countEl = $('#scan-cart-count');
+    const listEl = $('#scan-cart-items');
+    if (countEl) countEl.textContent = `${getCart().length} รายการ · ฿${formatMoney(t.total)}`;
+    if (listEl) listEl.innerHTML = buildScanCartListHtml();
+  }
+
   pageContent.innerHTML = `
-    <div class="flex-between mb-2">
-      <h2 style="font-size:1.1rem;">สแกน Barcode</h2>
+    <div class="flex-between mb-1">
+      <h2 style="font-size:1.05rem;margin:0;">สแกนขาย</h2>
       <button class="btn btn-outline btn-sm" id="btn-scan-close">ปิด</button>
     </div>
-    <div id="scanner-region" class="scanner-region"></div>
-    <p class="text-center text-muted mt-2" style="font-size:0.85rem;">
-      หันกล้องไปที่บาร์โค้ด · สแกนแล้วเพิ่มตะกร้าอัตโนมัติ
+    <div id="scanner-region" class="scanner-region" style="min-height:180px;max-height:240px;"></div>
+    <p class="text-center text-muted" style="font-size:0.8rem;margin:6px 0 8px;">
+      หันกล้องไปที่บาร์โค้ด · เพิ่มตะกร้าอัตโนมัติ
     </p>
-    <div class="card mt-2" style="padding:10px;">
+
+    <div class="card" style="padding:10px;margin-bottom:8px;">
       <div class="flex-between" style="margin-bottom:6px;">
-        <span class="text-muted" style="font-size:0.85rem;">ตะกร้า</span>
-        <strong id="scan-cart-count">${getCart().length} รายการ · ฿${formatMoney(calcTotals().total)}</strong>
+        <span style="font-weight:600;font-size:0.9rem;">รายการที่สแกน</span>
+        <strong id="scan-cart-count" style="color:var(--primary);font-size:0.9rem;">
+          ${getCart().length} รายการ · ฿${formatMoney(calcTotals().total)}
+        </strong>
       </div>
-      <button class="btn btn-primary btn-block" id="btn-scan-done">เสร็จสิ้น / ดูตะกร้า</button>
+      <div id="scan-cart-items" style="max-height:220px;overflow-y:auto;-webkit-overflow-scrolling:touch;">
+        ${buildScanCartListHtml()}
+      </div>
+      <button class="btn btn-primary btn-block btn-lg mt-2" id="btn-scan-done" style="height:52px;">
+        เสร็จสิ้น / ชำระเงิน
+      </button>
     </div>
-    <div class="mt-2">
-      <p class="text-muted text-center" style="font-size:0.8rem;margin-bottom:8px;">หรือพิมพ์รหัส</p>
-      <div style="display:flex;gap:8px;">
-        <input type="text" id="manual-barcode" class="form-control" placeholder="Barcode / รหัส" inputmode="numeric">
-        <button class="btn btn-primary" id="btn-manual-add" style="white-space:nowrap;">เพิ่ม</button>
-      </div>
+
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+      <input type="text" id="manual-barcode" class="form-control" placeholder="พิมพ์ barcode" inputmode="numeric">
+      <button class="btn btn-outline" id="btn-manual-add" style="white-space:nowrap;">เพิ่ม</button>
     </div>
   `;
 
@@ -1182,9 +1249,7 @@ async function renderPosScan() {
     if (!code) return;
     await scanAndAdd(code);
     $('#manual-barcode').value = '';
-    const t = calcTotals();
-    const el = $('#scan-cart-count');
-    if (el) el.textContent = `${getCart().length} รายการ · ฿${formatMoney(t.total)}`;
+    refreshScanCartUI();
   };
   $('#btn-manual-add')?.addEventListener('click', doManual);
   $('#manual-barcode')?.addEventListener('keydown', (e) => {
@@ -1198,10 +1263,8 @@ async function renderPosScan() {
     showLoading('เปิดกล้อง...');
     await startScanner('scanner-region', async (code) => {
       await scanAndAdd(code);
-      const t = calcTotals();
-      const el = $('#scan-cart-count');
-      if (el) el.textContent = `${getCart().length} รายการ · ฿${formatMoney(t.total)}`;
-    });
+      refreshScanCartUI();
+    }, { qrbox: { width: 260, height: 140 } });
     hideLoading();
   } catch (err) {
     hideLoading();
@@ -1354,7 +1417,7 @@ function renderPosDiscount() {
 let checkoutPayload = null;
 let paymentSubmitting = false;
 
-function onPosCheckout() {
+async function onPosCheckout() {
   try {
     requireEmployee();
   } catch (e) {
@@ -1366,7 +1429,23 @@ function onPosCheckout() {
     showToast('ตะกร้าว่าง', 'error');
     return;
   }
+  // ตรวจกะอีกครั้งก่อนชำระ
+  try {
+    const shift = await getOpenShift(getCurrentShopId());
+    if (!shift) {
+      showToast('กะถูกปิดแล้ว — เปิดกะใหม่ก่อนขาย', 'error');
+      posMode = 'cart';
+      renderPos();
+      return;
+    }
+    window.__posOpenShiftId = shift.id || shift.shiftId || null;
+  } catch (e) {
+    console.warn(e);
+  }
   checkoutPayload = buildCheckoutPayload();
+  if (window.__posOpenShiftId) {
+    checkoutPayload.shiftId = window.__posOpenShiftId;
+  }
   renderPaymentMethod(checkoutPayload);
 }
 
