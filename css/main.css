@@ -679,3 +679,12 @@ small.text-muted { font-size: 0.75rem; display: block; margin-top: 4px; }
 body:has(.connectivity-banner.show) .header {
   margin-top: 32px;
 }
+
+
+/* POS scan live cart */
+.scanner-region {
+  max-height: 240px;
+}
+.scan-cart-row:last-child {
+  border-bottom: none !important;
+}
