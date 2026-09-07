@@ -2,7 +2,6 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ===== Helper Functions (ใช้ role จาก users document — ใช้งานได้จริงใน Phase 2) =====
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -43,16 +42,13 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == uid;
     }
 
-    // ===== Shops =====
     match /shops/{shopId} {
       allow read: if sameShop(shopId);
       allow create, update: if isAdmin() && sameShop(shopId);
       allow delete: if false;
     }
 
-    // ===== Users (Auth profile) =====
     match /users/{uid} {
-      // อนุญาตให้อ่าน/สร้าง profile ของตัวเองครั้งแรก (หลัง login)
       allow read: if isOwner(uid) || isManagerOrAbove();
       allow create: if isOwner(uid) || isAdmin();
       allow update: if isAdmin() ||
@@ -60,7 +56,6 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // ===== Employees =====
     match /employees/{employeeId} {
       allow read: if isCashierOrAbove() &&
         (resource == null || sameShop(resource.data.shopId));
@@ -69,21 +64,18 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // ===== Categories =====
     match /categories/{categoryId} {
       allow read: if isCashierOrAbove() && sameShop(resource.data.shopId);
       allow create, update: if isManagerOrAbove() && sameShop(request.resource.data.shopId);
       allow delete: if false;
     }
 
-    // ===== Products =====
     match /products/{productId} {
       allow read: if isCashierOrAbove() && sameShop(resource.data.shopId);
       allow create, update: if isManagerOrAbove() && sameShop(request.resource.data.shopId);
       allow delete: if false;
     }
 
-    // ===== Sales =====
     match /sales/{saleId} {
       allow read: if isCashierOrAbove() && sameShop(resource.data.shopId);
       allow create: if isCashierOrAbove()
@@ -93,7 +85,6 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // ===== Payments =====
     match /payments/{paymentId} {
       allow read: if isCashierOrAbove() && sameShop(resource.data.shopId);
       allow create: if isCashierOrAbove() && sameShop(request.resource.data.shopId);
@@ -101,15 +92,12 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // ===== Receipts =====
     match /receipts/{receiptId} {
       allow read: if isCashierOrAbove() && sameShop(resource.data.shopId);
       allow create: if isCashierOrAbove() && sameShop(request.resource.data.shopId);
       allow update, delete: if false;
     }
 
-    // ===== Inventory Transactions (append-only) =====
-    // Cashier ต้อง create ได้ตอนขาย (ตัด stock) — ห้าม update/delete
     match /inventoryTransactions/{txId} {
       allow read: if isCashierOrAbove() &&
         (resource == null || sameShop(resource.data.shopId));
@@ -117,7 +105,6 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // ===== Stock Adjustments (append-only) =====
     match /stockAdjustments/{adjustId} {
       allow read: if isManagerOrAbove() &&
         (resource == null || sameShop(resource.data.shopId));
@@ -125,37 +112,39 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // ===== Refunds =====
     match /refunds/{refundId} {
       allow read: if isManagerOrAbove() && sameShop(resource.data.shopId);
       allow create: if isManagerOrAbove() && sameShop(request.resource.data.shopId);
       allow update, delete: if false;
     }
 
-    // ===== Shifts =====
     match /shifts/{shiftId} {
       allow read: if isCashierOrAbove() && sameShop(resource.data.shopId);
       allow create, update: if isCashierOrAbove() && sameShop(request.resource.data.shopId);
       allow delete: if false;
     }
 
-    // ===== Audit Logs (append-only) =====
     match /auditLogs/{logId} {
       allow read: if isManagerOrAbove() && sameShop(resource.data.shopId);
       allow create: if isCashierOrAbove() && sameShop(request.resource.data.shopId);
       allow update, delete: if false;
     }
 
-    // ===== Counters (receipt number) =====
     match /counters/{shopId} {
       allow read: if sameShop(shopId);
       allow write: if isCashierOrAbove() && sameShop(shopId);
     }
 
-    // ===== Settings =====
     match /settings/{shopId} {
       allow read: if sameShop(shopId);
       allow write: if isAdmin() && sameShop(shopId);
+    }
+
+    // แคตตาล็อกบาร์โค้ด — จำชื่อสินค้าไทย
+    match /barcodeCatalog/{code} {
+      allow read: if isAuthenticated();
+      allow create, update: if isManagerOrAbove();
+      allow delete: if isAdmin();
     }
   }
 }
