@@ -1,1 +1,1 @@
-export const c1 = "PLACEHOLDER";
+// removed - not used
