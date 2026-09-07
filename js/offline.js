@@ -22,6 +22,13 @@ const STORE_META = 'meta';
 let dbPromise = null;
 let syncing = false;
 let onlineListeners = [];
+/** ลงทะเบียน completeSale จาก app.js เพื่อ auto-sync ตอน online */
+let saleCompleter = null;
+
+export function setSaleCompleter(fn) {
+  saleCompleter = typeof fn === 'function' ? fn : null;
+}
+
 
 function openDb() {
   if (dbPromise) return dbPromise;
@@ -78,8 +85,8 @@ function notifyConnectivity() {
 export function initOfflineListeners() {
   window.addEventListener('online', () => {
     notifyConnectivity();
-    // auto-sync
-    syncPendingSales().catch(console.warn);
+    // auto-sync (ใช้ saleCompleter ที่ app ลงทะเบียนไว้)
+    syncPendingSales(saleCompleter).catch(console.warn);
   });
   window.addEventListener('offline', () => notifyConnectivity());
 }
@@ -261,8 +268,9 @@ export async function removeSyncedPending(olderThanMs = 7 * 24 * 3600 * 1000) {
  * completeSaleFn = completeSale จาก payment.js
  */
 export async function syncPendingSales(completeSaleFn) {
+  const fn = completeSaleFn || saleCompleter;
   if (!isOnline() || syncing) return { synced: 0, failed: 0, skipped: true };
-  if (!completeSaleFn) return { synced: 0, failed: 0, error: 'no completeSaleFn' };
+  if (!fn) return { synced: 0, failed: 0, error: 'no completeSaleFn' };
 
   syncing = true;
   let synced = 0;
@@ -275,7 +283,7 @@ export async function syncPendingSales(completeSaleFn) {
 
     for (const item of pending) {
       try {
-        await completeSaleFn({
+        await fn({
           payload: item.payload,
           paymentMethod: item.paymentMethod,
           amountReceived: item.amountReceived,

@@ -40,7 +40,8 @@ import {
   enqueuePendingSale,
   syncPendingSales,
   getPendingCount,
-  listPendingSales
+  listPendingSales,
+  setSaleCompleter
 } from './offline.js';
 
 // ---------- State ----------
@@ -59,6 +60,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     initAuth();
     initOfflineListeners();
+    setSaleCompleter(completeSale);
     setupConnectivityBanner();
     const user = await waitForAuth();
     if (user) {
