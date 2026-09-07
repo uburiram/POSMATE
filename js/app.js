@@ -1,6 +1,6 @@
 /**
- * POSMATE — Main Application Controller
- * CRITICAL: This is a temporary minimal boot loader while full app is restored.
- * Import the full implementation from app-main.js
+ * POSMATE — temporary restore loader
+ * Loads last known-good app bundle (shift gate + scan cart + offline sync)
+ * Pin: 69889c0824212be6c7dae78f2e1d80b37690b437
  */
-import './app-main.js';
+import 'https://cdn.jsdelivr.net/gh/uburiram/POSMATE@69889c0824212be6c7dae78f2e1d80b37690b437/js/app.js';
