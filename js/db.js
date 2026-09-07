@@ -333,16 +333,63 @@ export async function getProduct(productId) {
 
 export async function getProductByBarcode(shopId, barcode) {
   if (!barcode) return null;
+  const code = String(barcode).trim();
   const q = query(
     collection(getDb(), 'products'),
     where('shopId', '==', shopId),
-    where('barcode', '==', String(barcode).trim()),
+    where('barcode', '==', code),
     limit(1)
   );
-  const snap = await getDocs(q);
-  if (snap.empty) return null;
-  const d = snap.docs[0];
-  return { id: d.id, ...d.data() };
+  try {
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      const d = snap.docs[0];
+      return { id: d.id, ...d.data() };
+    }
+  } catch (e) {
+    const list = await listProducts(shopId, { limitCount: 500 });
+    return list.find(p => String(p.barcode || '').trim() === code) || null;
+  }
+  return null;
+}
+
+/**
+ * สร้าง SKU อัตโนมัติ
+ * หลักเกณฑ์:
+ * - มี barcode → PREFIX-XXXXXX (6 ตัวท้ายของตัวเลขใน barcode)
+ * - ไม่มี barcode → PREFIX-0001 (เลขรันต่อจาก SKU ในร้าน)
+ * - PREFIX จากชื่อหมวด (A-Z0-9 สูงสุด 4 ตัว) ไม่มีหมวดใช้ PRD
+ */
+export async function generateNextSku(shopId, { categoryName = '', barcode = '' } = {}) {
+  const raw = String(categoryName || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const prefix = (raw.slice(0, 4) || 'PRD');
+
+  if (barcode) {
+    const digits = String(barcode).replace(/\D/g, '');
+    const tail = (digits || String(barcode)).slice(-6).toUpperCase();
+    return `${prefix}-${tail}`;
+  }
+
+  let products = [];
+  try {
+    products = await listProducts(shopId, { limitCount: 500 });
+  } catch (_) {
+    products = [];
+  }
+
+  let maxSeq = 0;
+  for (const p of products) {
+    const sku = String(p.sku || '');
+    let n = null;
+    if (sku.toUpperCase().startsWith(prefix + '-')) {
+      n = parseInt(sku.slice(prefix.length + 1), 10);
+    } else {
+      const m = sku.match(/(\d+)$/);
+      if (m) n = parseInt(m[1], 10);
+    }
+    if (n != null && !Number.isNaN(n)) maxSeq = Math.max(maxSeq, n);
+  }
+  return `${prefix}-${String(maxSeq + 1).padStart(4, '0')}`;
 }
 
 export async function saveProduct(productId, data) {

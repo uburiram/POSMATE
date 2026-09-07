@@ -133,36 +133,94 @@ export function setDiscount(type, value) {
 }
 
 /**
- * สแกน barcode → หาสินค้า → เพิ่มตะกร้า
+ * ปรับรูปแบบ barcode ที่พบบ่อย (ตัดช่องว่าง, ลองตัดเลข 0 นำหน้า)
  */
+export function normalizeBarcode(raw) {
+  if (raw == null) return '';
+  return String(raw).trim().replace(/\s+/g, '');
+}
+
+export function barcodeVariants(raw) {
+  const code = normalizeBarcode(raw);
+  if (!code) return [];
+  const set = new Set([code]);
+  // EAN-13 บางครั้งอ่านเป็น UPC-A (ตัด 0 นำหน้า) หรือกลับกัน
+  if (/^\d+$/.test(code)) {
+    if (code.length === 12) set.add('0' + code);
+    if (code.length === 13 && code.startsWith('0')) set.add(code.slice(1));
+    // ตัด 0 นำหน้าทั้งหมด (กรณีสแกนได้ padding)
+    const stripped = code.replace(/^0+/, '');
+    if (stripped && stripped !== code) set.add(stripped);
+  }
+  return [...set];
+}
+
+/**
+ * สแกน barcode → หาสินค้า → เพิ่มตะกร้า
+ * หมายเหตุ: ห้ามใช้ scannerBusy บล็อกที่ต้นฟังก์ชันร่วมกับ startScanner
+ * (บั๊กเดิม: กล้องขึ้นกรอบเขียวแต่ไม่เข้าตะกร้า)
+ */
+let addInProgress = false;
+let lastScanCode = '';
+let lastScanAt = 0;
+
 export async function scanAndAdd(barcode) {
-  if (!barcode || scannerBusy) return null;
-  scannerBusy = true;
+  const code = normalizeBarcode(barcode);
+  if (!code) return null;
+
+  // กันสแกนซ้ำรหัสเดิมภายใน 1.5 วินาที
+  const now = Date.now();
+  if (code === lastScanCode && (now - lastScanAt) < 1500) {
+    return { found: true, duplicate: true };
+  }
+
+  if (addInProgress) return null;
+  addInProgress = true;
+  lastScanCode = code;
+  lastScanAt = now;
+
   try {
     const shopId = getCurrentShopId();
-    const code = String(barcode).trim();
+    const variants = barcodeVariants(code);
     let product = null;
-    if (isOnline()) {
-      try {
-        product = await getProductByBarcode(shopId, code);
-      } catch (e) {
-        product = await getCachedProductByBarcode(shopId, code);
+
+    for (const v of variants) {
+      if (isOnline()) {
+        try {
+          product = await getProductByBarcode(shopId, v);
+        } catch (e) {
+          product = await getCachedProductByBarcode(shopId, v);
+        }
+      } else {
+        product = await getCachedProductByBarcode(shopId, v);
       }
-    } else {
-      product = await getCachedProductByBarcode(shopId, code);
+      if (product) break;
     }
+
+    // fallback: ค้นในแคชด้วยทุก variants
     if (!product) {
-      showToast(isOnline() ? 'ไม่พบสินค้านี้' : 'ไม่พบในแคช (offline)', 'error');
-      return { found: false, barcode };
+      for (const v of variants) {
+        product = await getCachedProductByBarcode(shopId, v);
+        if (product) break;
+      }
     }
+
+    if (!product) {
+      showToast(`ไม่พบสินค้า: ${code}`, 'error', 2500);
+      try { navigator.vibrate?.(80); } catch (_) {}
+      return { found: false, barcode: code };
+    }
+
     addToCart(product, 1);
-    showToast(`+ ${product.name}${isOnline() ? '' : ' (offline)'}`, 'success', 1500);
+    showToast(`+ ${product.name}`, 'success', 1500);
+    try { navigator.vibrate?.([40, 30, 40]); } catch (_) {}
     return { found: true, product };
   } catch (err) {
     showToast(err.message || 'เพิ่มสินค้าไม่สำเร็จ', 'error');
+    try { navigator.vibrate?.(120); } catch (_) {}
     return { found: false, error: err.message };
   } finally {
-    scannerBusy = false;
+    addInProgress = false;
   }
 }
 
@@ -187,57 +245,63 @@ function loadScannerLib() {
  * เริ่มสแกนด้วยกล้อง
  * @param {string} elementId - id ของ div ที่จะใส่ scanner
  * @param {function} onDetected - callback(barcode)
+ * @param {object} options - { qrbox }
  */
-export async function startScanner(elementId, onDetected) {
+export async function startScanner(elementId, onDetected, options = {}) {
   await stopScanner();
   const Html5Qrcode = await loadScannerLib();
   const el = document.getElementById(elementId);
   if (!el) throw new Error('ไม่พบ element สแกนเนอร์');
 
   scannerInstance = new Html5Qrcode(elementId);
+  const qrbox = options.qrbox || { width: 280, height: 180 };
   const startConfig = {
-    fps: 10,
-    qrbox: { width: 260, height: 160 },
-    aspectRatio: 1.333
+    fps: 12,
+    qrbox,
+    aspectRatio: 1.333,
+    disableFlip: false
   };
+
+  // ใช้ cooldown แยก ไม่บล็อก scanAndAdd ก่อนเริ่มทำงาน
+  let handling = false;
 
   await scannerInstance.start(
     { facingMode: 'environment' },
     startConfig,
     async (decodedText) => {
-      if (scannerBusy) return;
-      // กันสแกนซ้ำเร็วเกินไป
-      scannerBusy = true;
+      if (handling) return;
+      handling = true;
       try {
-        if (onDetected) await onDetected(decodedText);
+        if (onDetected) await onDetected(normalizeBarcode(decodedText));
+      } catch (e) {
+        console.error('scan handler', e);
       } finally {
-        setTimeout(() => { scannerBusy = false; }, 1200);
+        setTimeout(() => { handling = false; }, 900);
       }
     },
-    () => { /* ignore scan miss */ }
+    () => { /* ignore frame miss */ }
   );
+  return scannerInstance;
 }
 
 export async function stopScanner() {
   if (scannerInstance) {
     try {
       const state = scannerInstance.getState?.();
-      // 2 = SCANNING
-      if (state === 2 || !state) {
-        await scannerInstance.stop();
+      // 2 = SCANNING, 3 = PAUSED (html5-qrcode states)
+      if (state === 2 || state === 3 || state == null) {
+        try { await scannerInstance.stop(); } catch (_) {}
       }
-      await scannerInstance.clear();
+      try { await scannerInstance.clear(); } catch (_) {}
     } catch (e) {
-      // ignore
+      console.warn('stopScanner', e);
     }
     scannerInstance = null;
   }
   scannerBusy = false;
+  addInProgress = false;
 }
 
-/**
- * ค้นหาสินค้าสำหรับ POS
- */
 export async function searchProductsForPos(keyword, limitCount = 30) {
   const shopId = getCurrentShopId();
   if (!isOnline()) {

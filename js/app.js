@@ -10,7 +10,7 @@ import { initAuth, waitForAuth, loginWithEmail, logout, setCurrentFromAuth,
 import {
   getShop, saveShop, listEmployees, getEmployee, saveEmployee, writeAuditLog,
   listCategories, saveCategory, getCategory, countProductsInCategory,
-  listProducts, getProduct, getProductByBarcode, saveProduct,
+  listProducts, getProduct, getProductByBarcode, saveProduct, generateNextSku,
   uploadProductImage, stockIn, adjustStock, listInventoryTransactions,
   getLowStockProducts, listSales, getSale, cancelSale, refundSale,
   getDashboardStats, getOpenShift, openShift, closeShift, listShifts
@@ -24,7 +24,7 @@ import { DEFAULT_SHOP_ID, APP_VERSION } from './config.js';
 import {
   getCart, getDiscount, clearCart, calcTotals, addToCart, setCartQty,
   removeFromCart, setDiscount, scanAndAdd, startScanner, stopScanner,
-  searchProductsForPos, buildCheckoutPayload, requireEmployee
+  searchProductsForPos, buildCheckoutPayload, requireEmployee, normalizeBarcode
 } from './pos.js';
 import {
   renderPromptPayQR,
@@ -1924,26 +1924,40 @@ async function openProductForm(productId) {
   ]);
   hideLoading();
 
+  let productScannerOpen = false;
+
   pageContent.innerHTML = `
     <div class="card">
       <h2 style="font-size:1.1rem;margin-bottom:16px;">${product ? 'แก้ไขสินค้า' : 'เพิ่มสินค้าใหม่'}</h2>
       <form id="product-form">
         <div class="form-group">
+          <label>Barcode</label>
+          <div style="display:flex;gap:8px;">
+            <input type="text" id="p-barcode" class="form-control" value="${escapeHtml(product?.barcode || '')}" placeholder="สแกนหรือพิมพ์" style="flex:1;" inputmode="numeric">
+            <button type="button" class="btn btn-primary" id="btn-scan-product-bc" style="white-space:nowrap;min-width:96px;">📷 สแกน</button>
+          </div>
+          <small class="text-muted">สแกนแล้วระบบดึงชื่อ/รายละเอียดอัตโนมัติ (ถ้ามีในฐานข้อมูลสินค้าสากล)</small>
+        </div>
+        <div id="product-scan-box" class="hidden" style="margin-bottom:12px;">
+          <div id="product-scanner-region" class="scanner-region"></div>
+          <button type="button" class="btn btn-outline btn-block mt-1" id="btn-close-product-scan">ปิดกล้อง</button>
+        </div>
+        <div class="form-group">
           <label>ชื่อสินค้า *</label>
           <input type="text" id="p-name" class="form-control" value="${escapeHtml(product?.name || '')}" required>
         </div>
         <div class="form-group">
-          <label>Barcode</label>
-          <input type="text" id="p-barcode" class="form-control" value="${escapeHtml(product?.barcode || '')}" placeholder="สแกนหรือพิมพ์">
-        </div>
-        <div class="form-group">
           <label>SKU / รหัสร้าน</label>
-          <input type="text" id="p-sku" class="form-control" value="${escapeHtml(product?.sku || '')}">
+          <div style="display:flex;gap:8px;">
+            <input type="text" id="p-sku" class="form-control" value="${escapeHtml(product?.sku || '')}" placeholder="สร้างอัตโนมัติ" style="flex:1;" ${product ? '' : 'readonly'}>
+            <button type="button" class="btn btn-outline" id="btn-gen-sku" style="white-space:nowrap;">สร้างใหม่</button>
+          </div>
+          <small class="text-muted">รูปแบบ: หมวด-เลขรัน หรือ หมวด-ท้ายบาร์โค้ด</small>
         </div>
         <div class="form-group">
-          <label>หมวดหมู่</label>
+          <label>หมวดหมู่ *</label>
           <select id="p-category" class="form-control">
-            <option value="">— ไม่ระบุ —</option>
+            <option value="">— เลือกหมวดหมู่ —</option>
             ${categories.filter(c => c.status !== 'INACTIVE').map(c => `
               <option value="${escapeHtml(c.id)}" ${product?.categoryId === c.id ? 'selected' : ''}>
                 ${escapeHtml(c.name)}
@@ -2001,6 +2015,117 @@ async function openProductForm(productId) {
     </div>
   `;
 
+  async function selectedCategoryName() {
+    const id = $('#p-category')?.value;
+    if (!id) return '';
+    const c = categories.find(x => x.id === id);
+    return c?.name || '';
+  }
+
+  async function fillAutoSku() {
+    if (productId && $('#p-sku')?.value.trim()) return; // แก้ไขของเดิมไม่บังคับทับ
+    const barcode = normalizeBarcode($('#p-barcode')?.value || '');
+    const catName = await selectedCategoryName();
+    try {
+      const sku = await generateNextSku(getCurrentShopId(), {
+        categoryName: catName,
+        barcode
+      });
+      $('#p-sku').value = sku;
+    } catch (e) {
+      console.warn(e);
+    }
+  }
+
+  // สินค้าใหม่: สร้าง SKU เริ่มต้น
+  if (!productId) {
+    fillAutoSku();
+  }
+
+  $('#p-category')?.addEventListener('change', () => {
+    if (!productId || !$('#p-sku').value.trim()) fillAutoSku();
+    else if (!productId) fillAutoSku();
+  });
+
+  $('#btn-gen-sku')?.addEventListener('click', async () => {
+    $('#p-sku').readOnly = false;
+    await fillAutoSku();
+    showToast('สร้าง SKU แล้ว', 'success', 1200);
+  });
+
+  $('#p-barcode')?.addEventListener('change', async () => {
+    const code = normalizeBarcode($('#p-barcode').value);
+    if (!code) return;
+    await applyBarcodeLookup(code);
+    await fillAutoSku();
+  });
+
+  async function applyBarcodeLookup(code) {
+    showLoading('ค้นหาข้อมูลสินค้าจากบาร์โค้ด...');
+    try {
+      // ถ้ามีสินค้านี้ในร้านแล้ว แจ้งเตือน
+      const existing = await getProductByBarcode(getCurrentShopId(), code);
+      if (existing && existing.id !== productId) {
+        showToast('บาร์โค้ดนี้มีในร้านแล้ว: ' + (existing.name || ''), 'error');
+        hideLoading();
+        return;
+      }
+
+      const info = await lookupOpenFoodFacts(code);
+      if (info) {
+        if (info.name && !$('#p-name').value.trim()) $('#p-name').value = info.name;
+        else if (info.name && !productId) $('#p-name').value = info.name;
+
+        if (info.brand || info.quantity) {
+          const descParts = [];
+          if (info.brand) descParts.push(info.brand);
+          if (info.quantity) descParts.push(info.quantity);
+          if (!$('#p-desc').value.trim()) $('#p-desc').value = descParts.join(' · ');
+        }
+        if (info.imageUrl && $('#p-image-preview')) {
+          $('#p-image-preview').innerHTML = `<img src="${escapeHtml(info.imageUrl)}" style="max-width:120px;border-radius:8px;" alt="">`;
+        }
+        showToast('ดึงข้อมูลสินค้าสำเร็จ', 'success');
+      } else {
+        showToast('ไม่พบข้อมูลสากล — กรอกชื่อและราคาเอง', 'info', 2500);
+      }
+    } catch (e) {
+      console.warn(e);
+      showToast('ค้นหาข้อมูลไม่สำเร็จ — กรอกเองได้', 'info');
+    } finally {
+      hideLoading();
+    }
+  }
+
+  async function openProductScanner() {
+    if (productScannerOpen) return;
+    productScannerOpen = true;
+    $('#product-scan-box')?.classList.remove('hidden');
+    try {
+      await startScanner('product-scanner-region', async (code) => {
+        const bc = normalizeBarcode(code);
+        if (!bc) return;
+        $('#p-barcode').value = bc;
+        await stopScanner().catch(() => {});
+        productScannerOpen = false;
+        $('#product-scan-box')?.classList.add('hidden');
+        await applyBarcodeLookup(bc);
+        await fillAutoSku();
+      }, { qrbox: { width: 280, height: 160 } });
+    } catch (e) {
+      productScannerOpen = false;
+      $('#product-scan-box')?.classList.add('hidden');
+      showToast(e.message || 'เปิดกล้องไม่สำเร็จ', 'error');
+    }
+  }
+
+  $('#btn-scan-product-bc')?.addEventListener('click', openProductScanner);
+  $('#btn-close-product-scan')?.addEventListener('click', async () => {
+    await stopScanner().catch(() => {});
+    productScannerOpen = false;
+    $('#product-scan-box')?.classList.add('hidden');
+  });
+
   $('#p-image')?.addEventListener('change', (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -2008,15 +2133,44 @@ async function openProductForm(productId) {
     $('#p-image-preview').innerHTML = `<img src="${url}" style="max-width:120px;border-radius:8px;">`;
   });
 
-  $('#btn-cancel-product').addEventListener('click', () => {
+  $('#btn-cancel-product').addEventListener('click', async () => {
+    await stopScanner().catch(() => {});
     if (productId) openProductDetail(productId);
     else renderProducts();
   });
 
   $('#product-form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    await stopScanner().catch(() => {});
     await saveProductForm(productId, product);
   });
+}
+
+/** ค้นข้อมูลสินค้าจาก Open Food Facts (ฟรี ไม่ต้อง API key) */
+async function lookupOpenFoodFacts(barcode) {
+  const code = normalizeBarcode(barcode);
+  if (!code || !isOnline()) return null;
+  const url = `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json`;
+  const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), 8000) : null;
+  let res;
+  try {
+    res = await fetch(url, ctrl ? { signal: ctrl.signal } : undefined);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+  if (!res.ok) return null;
+  const data = await res.json();
+  if (data.status !== 1 || !data.product) return null;
+  const p = data.product;
+  const name = (p.product_name_th || p.product_name || p.product_name_en || '').trim();
+  if (!name) return null;
+  return {
+    name,
+    brand: (p.brands || '').trim(),
+    quantity: (p.quantity || '').trim(),
+    imageUrl: p.image_front_small_url || p.image_url || null
+  };
 }
 
 async function saveProductForm(productId, oldProduct) {
@@ -2036,9 +2190,23 @@ async function saveProductForm(productId, oldProduct) {
     showToast('กรุณากรอกชื่อสินค้า', 'error');
     return;
   }
+  if (!productId && !categoryId) {
+    showToast('กรุณาเลือกหมวดหมู่', 'error');
+    return;
+  }
   if (isNaN(costPrice) || costPrice < 0 || isNaN(sellPrice) || sellPrice < 0) {
     showToast('ราคาไม่ถูกต้อง', 'error');
     return;
+  }
+
+  // SKU ว่าง → สร้างอัตโนมัติ
+  let finalSku = sku;
+  if (!finalSku) {
+    const cat = categoryId ? await getCategory(categoryId).catch(() => null) : null;
+    finalSku = await generateNextSku(getCurrentShopId(), {
+      categoryName: cat?.name || '',
+      barcode
+    });
   }
 
   // ตรวจ barcode ซ้ำ
@@ -2057,7 +2225,7 @@ async function saveProductForm(productId, oldProduct) {
       shopId,
       name,
       barcode: barcode || null,
-      sku: sku || null,
+      sku: finalSku || null,
       categoryId,
       description: description || null,
       costPrice,

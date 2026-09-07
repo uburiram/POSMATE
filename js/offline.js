@@ -128,8 +128,16 @@ export async function getCachedProducts(shopId) {
 
 export async function getCachedProductByBarcode(shopId, barcode) {
   const list = await getCachedProducts(shopId);
-  const code = String(barcode).trim();
-  return list.find(p => p.barcode && String(p.barcode) === code) || null;
+  const code = String(barcode || '').trim();
+  if (!code) return null;
+  const variants = new Set([code]);
+  if (/^\d+$/.test(code)) {
+    if (code.length === 12) variants.add('0' + code);
+    if (code.length === 13 && code.startsWith('0')) variants.add(code.slice(1));
+    const stripped = code.replace(/^0+/, '');
+    if (stripped) variants.add(stripped);
+  }
+  return list.find(p => p.barcode && variants.has(String(p.barcode).trim())) || null;
 }
 
 export async function searchCachedProducts(shopId, keyword) {

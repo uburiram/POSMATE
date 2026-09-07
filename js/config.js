@@ -17,4 +17,4 @@ export const firebaseConfig = {
 export const DEFAULT_SHOP_ID = "shop_main";
 
 // App version
-export const APP_VERSION = "1.0.1";
+export const APP_VERSION = "1.0.2";
