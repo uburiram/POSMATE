@@ -15,6 +15,8 @@ import {
 } from './utils.js';
 import * as ui from './app-state.js';
 import { $, pageContent, navigate, pinModal, updateHeader } from './app-state.js';
+import { requireEmployee } from './pos.js';
+import { APP_VERSION } from './config.js';
 
 export async function renderDashboard() {
   showLoading('โหลด Dashboard...');
@@ -227,7 +229,6 @@ export async function renderReports() {
   showLoading('โหลดรายงาน...');
   const shopId = getCurrentShopId();
 
-  // presets
   const today = new Date();
   const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
   const weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate() - 6);
@@ -396,43 +397,27 @@ export async function closeShiftForm(shift) {
   $('#btn-shift-back')?.addEventListener('click', () => navigate('dashboard'));
   $('#btn-shift-close')?.addEventListener('click', async () => {
     try { requireEmployee(); } catch (e) { showToast(e.message, 'error'); return; }
-    const counted = parseFloat(countedInput.value);
-    if (isNaN(counted) || counted < 0) {
-      showToast('กรุณากรอกเงินสดที่นับได้', 'error');
+    const counted = parseFloat(countedInput?.value);
+    if (isNaN(counted)) {
+      showToast('กรุณากรอกจำนวนเงินที่นับได้', 'error');
       return;
     }
-    if (!confirm('ยืนยันปิดกะ?')) return;
     showLoading('กำลังปิดกะ...');
     try {
       const result = await closeShift({
-        shopId: getCurrentShopId(),
         shiftId: shift.id,
+        shopId: getCurrentShopId(),
         employeeId: getCurrentEmployee()?.id,
         userId: getCurrentUser()?.uid,
         countedCash: counted,
-        note: $('#shift-note')?.value.trim() || null
+        note: $('#shift-note')?.value?.trim() || ''
       });
       hideLoading();
-      showToast('ปิดกะสำเร็จ', 'success');
-      pageContent.innerHTML = `
-        <div class="card text-center">
-          <div style="font-size:2.5rem;">✅</div>
-          <h2 style="font-size:1.1rem;margin:8px 0;">ปิดกะเรียบร้อย</h2>
-          <p>ยอดขาย ฿${formatMoney(result.stats.totalSales)}</p>
-          <p>เงินสดคาดว่า ฿${formatMoney(result.expectedCash)}</p>
-          <p>นับได้ ฿${formatMoney(result.countedCash)}</p>
-          <p class="${result.difference === 0 ? 'text-success' : result.difference > 0 ? 'text-success' : 'text-danger'}">
-            ${result.difference === 0 ? 'ตรงกัน' : result.difference > 0 ? 'เกิน ฿' + formatMoney(result.difference) : 'ขาด ฿' + formatMoney(Math.abs(result.difference))}
-          </p>
-          <button class="btn btn-primary btn-block mt-2" id="btn-shift-done">กลับหน้าหลัก</button>
-        </div>
-      `;
-      $('#btn-shift-done')?.addEventListener('click', () => navigate('dashboard'));
+      showToast('ปิดกะแล้ว', 'success');
+      navigate('dashboard');
     } catch (err) {
       hideLoading();
       showToast(err.message || 'ปิดกะไม่สำเร็จ', 'error');
     }
   });
 }
-
-
