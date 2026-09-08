@@ -9,7 +9,7 @@ import {
 } from './auth.js';
 import {
   showToast, showLoading, hideLoading, escapeHtml, formatMoney, formatDateTime,
-  firestoreErrorHtml, isFirestoreIndexError
+  firestoreErrorHtml, isFirestoreIndexError, debounce
 } from './utils.js';
 import { openReceiptPrint, reprintSale } from './payment.js';
 import { $, pageContent, navigate } from './app-state.js';
@@ -308,4 +308,3 @@ export function openRefundForm(sale) {
     }
   });
 }
-
