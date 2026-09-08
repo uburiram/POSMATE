@@ -1,46 +1,66 @@
 /**
- * POSMATE — emergency minimal app (login + dashboard shell)
- * Restores login while full monolith is re-published
+ * POSMATE — Application shell (router + boot)
+ * Version: 1.0.7
  */
-import { initAuth, waitForAuth, loginWithEmail, logout, setCurrentFromAuth,
-         getCurrentProfile, getCurrentEmployee, getCurrentRole, getCurrentShopId,
-         switchEmployeeByPin } from './auth.js';
-import { listProducts, getDashboardStats, getOpenShift, getShop } from './db.js';
-import { showToast, showLoading, hideLoading, escapeHtml, formatMoney, formatDateTime } from './utils.js';
+import {
+  initAuth, waitForAuth, loginWithEmail, logout, setCurrentFromAuth,
+  getCurrentUser, getCurrentProfile, getCurrentEmployee, getCurrentRole,
+  getCurrentShopId, hasRole, switchEmployeeByPin
+} from './auth.js';
+import { listProducts } from './db.js';
+import { showToast, showLoading, hideLoading, firestoreErrorHtml } from './utils.js';
 import { APP_VERSION } from './config.js';
-import { initOfflineListeners, setSaleCompleter, refreshProductCache, syncPendingSales } from './offline.js';
+import { stopScanner } from './pos.js';
 import { completeSale } from './payment.js';
+import {
+  initOfflineListeners, onConnectivityChange, isOnline,
+  refreshProductCache, syncPendingSales, getPendingCount, setSaleCompleter
+} from './offline.js';
+import {
+  $, bindDom, setNavigate, setRenderPage, setUpdateHeader,
+  setCurrentPage, setPosMode, currentPage, pageContent,
+  loginScreen, mainApp, headerUser, pinModal
+} from './app-state.js';
 
-const $ = (s) => document.querySelector(s);
-let loginScreen, mainApp, pageContent, headerUser, pinModal;
+import { renderDashboard } from './page-dashboard.js';
+import { renderEmployees } from './page-employees.js';
+import { renderSettings } from './page-settings.js';
+import { renderPos } from './page-pos.js';
+import { renderProducts } from './page-products.js';
+import { renderSalesHistory } from './page-history.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
-  loginScreen = $('#login-screen');
-  mainApp = $('#main-app');
-  pageContent = $('#page-content');
-  headerUser = $('#header-user');
-  pinModal = $('#pin-modal');
+  bindDom();
+  setNavigate(navigate);
+  setRenderPage(renderPage);
+  setUpdateHeader(updateHeader);
 
   try {
     initAuth();
     initOfflineListeners();
     setSaleCompleter(completeSale);
+    setupConnectivityBanner();
     const user = await waitForAuth();
     if (user) {
       await setCurrentFromAuth(user);
-      showMain();
+      showMainApp();
+      refreshProductCache(getCurrentShopId(), listProducts).catch(() => {});
+      syncPendingSales(completeSale).then(r => {
+        if (r.synced > 0) showToast(`Sync การขาย offline ${r.synced} รายการ`, 'success');
+      }).catch(() => {});
     } else {
       showLogin();
     }
-  } catch (e) {
-    console.error(e);
+  } catch (err) {
+    console.error('Boot error:', err);
     showLogin();
-    showToast('เริ่มระบบไม่สำเร็จ: ' + (e.message || e), 'error');
+    showToast('เกิดข้อผิดพลาดในการเริ่มระบบ', 'error');
   }
-  bind();
+
+  bindEvents();
 });
 
-function bind() {
+function bindEvents() {
   $('#login-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const email = $('#email').value.trim();
@@ -49,103 +69,187 @@ function bind() {
     btn.disabled = true;
     try {
       await loginWithEmail(email, password);
+      showMainApp();
       showToast('เข้าสู่ระบบสำเร็จ', 'success');
-      showMain();
+      refreshProductCache(getCurrentShopId(), listProducts).catch(() => {});
+      syncPendingSales(completeSale).then(r => {
+        if (r.synced > 0) showToast(`Sync การขาย offline ${r.synced} รายการ`, 'success');
+      }).catch(() => {});
     } catch (err) {
-      console.error(err);
       showToast(err.message || 'เข้าสู่ระบบไม่สำเร็จ', 'error');
     } finally {
       btn.disabled = false;
     }
   });
+
   $('#btn-logout')?.addEventListener('click', async () => {
-    if (!confirm('ออกจากระบบ?')) return;
+    if (!confirm('ต้องการออกจากระบบ?')) return;
     await logout();
     showLogin();
+    showToast('ออกจากระบบแล้ว', 'info');
   });
+
   document.querySelectorAll('.bottom-nav a').forEach(a => {
     a.addEventListener('click', (e) => {
       e.preventDefault();
       const page = a.dataset.page;
-      if (page) renderPage(page);
+      if (!page) return;
+      navigate(page);
     });
   });
-  $('#btn-switch-emp')?.addEventListener('click', async () => {
-    try {
-      const emp = await switchEmployeeByPin($('#emp-code').value.trim(), $('#emp-pin').value.trim());
-      pinModal?.classList.remove('active');
-      updateHeader();
-      showToast('เข้างาน: ' + (emp.firstName || emp.code), 'success');
-    } catch (err) {
-      showToast(err.message || 'สลับพนักงานไม่สำเร็จ', 'error');
-    }
-  });
+
+  $('#btn-switch-emp')?.addEventListener('click', onSwitchEmployee);
   $('#btn-close-pin')?.addEventListener('click', () => pinModal?.classList.remove('active'));
 }
 
 function showLogin() {
   loginScreen?.classList.remove('hidden');
   mainApp?.classList.add('hidden');
+  pinModal?.classList.remove('active');
 }
-function showMain() {
+
+function showMainApp() {
   loginScreen?.classList.add('hidden');
   mainApp?.classList.remove('hidden');
   updateHeader();
-  renderPage('dashboard');
-}
-function updateHeader() {
-  const p = getCurrentProfile();
-  const emp = getCurrentEmployee();
-  let t = p?.displayName || p?.email || '-';
-  if (emp) t += ' · ' + (emp.firstName || emp.code);
-  t += ' (' + getCurrentRole() + ')';
-  if (headerUser) headerUser.textContent = t;
+  navigate('dashboard');
 }
 
-async function renderPage(page) {
+function updateHeader() {
+  const profile = getCurrentProfile();
+  const emp = getCurrentEmployee();
+  const role = getCurrentRole();
+  let text = profile?.displayName || profile?.email || '-';
+  if (emp) text += ` · ${emp.firstName || emp.code}`;
+  text += ` (${role})`;
+  if (headerUser) headerUser.textContent = text;
+}
+
+async function navigate(page) {
+  if (currentPage === 'pos' && page !== 'pos') {
+    await stopScanner().catch(() => {});
+    setPosMode('cart');
+  }
+
+  const gates = {
+    dashboard: ['ADMIN', 'MANAGER', 'CASHIER'],
+    pos: ['ADMIN', 'MANAGER', 'CASHIER'],
+    history: ['ADMIN', 'MANAGER', 'CASHIER'],
+    products: ['ADMIN', 'MANAGER'],
+    employees: ['ADMIN'],
+    settings: ['ADMIN', 'MANAGER']
+  };
+  const allowed = gates[page] || ['ADMIN'];
+  if (!hasRole(...allowed)) {
+    showToast('ไม่มีสิทธิ์เข้าหน้านี้', 'error');
+    page = 'dashboard';
+  }
+
+  setCurrentPage(page);
+
   document.querySelectorAll('.bottom-nav a').forEach(a => {
     a.classList.toggle('active', a.dataset.page === page);
   });
+
+  const isCashier = getCurrentRole() === 'CASHIER';
+  document.querySelector('[data-page="products"]')?.classList.toggle('hidden', isCashier);
+  document.querySelector('[data-page="employees"]')?.classList.toggle('hidden', isCashier);
+  document.querySelector('[data-page="settings"]')?.classList.toggle('hidden', isCashier);
+
+  await renderPage(page);
+}
+
+async function renderPage(page) {
   if (!pageContent) return;
   pageContent.innerHTML = '<div class="text-center text-muted" style="padding:40px 0;">กำลังโหลด...</div>';
   try {
-    if (page === 'dashboard') await renderDashboard();
-    else if (page === 'pos') pageContent.innerHTML = '<div class="card"><p>หน้าขาย — กำลังกู้คืน full app</p><p class="text-muted">Login ใช้ได้แล้ว</p></div>';
-    else if (page === 'history') pageContent.innerHTML = '<div class="card"><p>ประวัติ — กำลังกู้คืน</p></div>';
-    else if (page === 'products') pageContent.innerHTML = '<div class="card"><p>สินค้า — กำลังกู้คืน</p></div>';
-    else if (page === 'employees') pageContent.innerHTML = '<div class="card"><p>พนักงาน — กำลังกู้คืน</p></div>';
-    else if (page === 'settings') pageContent.innerHTML = '<div class="card"><p>ตั้งค่า — กำลังกู้คืน</p></div>';
-    else pageContent.innerHTML = '<div class="card"><p>หน้านี้ยังไม่พร้อม</p></div>';
+    switch (page) {
+      case 'dashboard':
+        await renderDashboard();
+        break;
+      case 'employees':
+        await renderEmployees();
+        break;
+      case 'settings':
+        await renderSettings();
+        break;
+      case 'pos':
+        await renderPos();
+        break;
+      case 'history':
+        await renderSalesHistory();
+        break;
+      case 'products':
+        await renderProducts();
+        break;
+      default:
+        pageContent.innerHTML = '<p class="text-center">หน้านี้ยังไม่พร้อม</p>';
+    }
   } catch (err) {
-    console.error(err);
-    pageContent.innerHTML = '<div class="card"><p style="color:#c00;">' + escapeHtml(err.message || String(err)) + '</p></div>';
+    console.error('renderPage', page, err);
+    pageContent.innerHTML = firestoreErrorHtml(err, { title: 'เกิดข้อผิดพลาด', retryId: 'btn-retry-page' });
+    $('#btn-retry-page')?.addEventListener('click', () => renderPage(currentPage));
   }
 }
 
-async function renderDashboard() {
-  showLoading('โหลดแดชบอร์ด...');
-  const shopId = getCurrentShopId();
-  let shop = null, stats = null, shift = null;
+async function onSwitchEmployee() {
+  const code = $('#emp-code')?.value.trim();
+  const pin = $('#emp-pin')?.value.trim();
+  if (!code || !pin) {
+    showToast('กรุณากรอกรหัสและ PIN', 'error');
+    return;
+  }
+  const btn = $('#btn-switch-emp');
+  if (btn) btn.disabled = true;
   try {
-    [shop, stats, shift] = await Promise.all([
-      getShop(shopId).catch(() => null),
-      getDashboardStats(shopId).catch(() => null),
-      getOpenShift(shopId).catch(() => null)
-    ]);
-  } catch (e) { console.warn(e); }
-  hideLoading();
-  pageContent.innerHTML = `
-    <div class="card">
-      <h2 style="margin:0 0 8px;">ยินดีต้อนรับ</h2>
-      <p class="text-muted">${escapeHtml(shop?.name || 'POSMATE')} · v${APP_VERSION}</p>
-      <p>สถานะ: <strong>Login สำเร็จ</strong></p>
-      ${shift ? `<p>กะเปิดอยู่ · เงินทอนเริ่มต้น ฿${formatMoney(shift.openingCash || 0)}</p>` : '<p class="text-muted">ยังไม่ได้เปิดกะ</p>'}
-      ${stats ? `<p>ยอดวันนี้ (ถ้ามี): ฿${formatMoney(stats.todaySales || stats.totalSales || 0)}</p>` : ''}
-      <button class="btn btn-primary btn-block mt-2" id="btn-dash-pin">เลือกพนักงาน / PIN</button>
-    </div>
-    <div class="card mt-2">
-      <p style="font-size:0.85rem;color:#666;">หน้าอื่นกำลังกู้คืน full app — login / auth ใช้ได้แล้ว</p>
-    </div>`;
-  $('#btn-dash-pin')?.addEventListener('click', () => pinModal?.classList.add('active'));
+    const emp = await switchEmployeeByPin(code, pin);
+    pinModal?.classList.remove('active');
+    updateHeader();
+    showToast(`เข้างาน: ${emp.firstName || emp.code}`, 'success');
+    if (currentPage === 'pos') await renderPos();
+  } catch (err) {
+    showToast(err.message || 'สลับพนักงานไม่สำเร็จ', 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
-console.info('[POSMATE] emergency login build', APP_VERSION);
+
+function setupConnectivityBanner() {
+  let banner = document.getElementById('connectivity-banner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'connectivity-banner';
+    banner.className = 'connectivity-banner';
+    document.body.appendChild(banner);
+  }
+  const update = async (online) => {
+    const pending = await getPendingCount().catch(() => 0);
+    if (!online) {
+      banner.textContent = pending > 0
+        ? `⚡ Offline · คิวรอ sync ${pending} รายการ`
+        : '⚡ Offline — ขายได้จากแคชสินค้า';
+      banner.classList.add('show', 'offline');
+      banner.classList.remove('online');
+    } else if (pending > 0) {
+      banner.textContent = `🔄 Online · มี ${pending} รายการรอ sync — แตะเพื่อ sync`;
+      banner.classList.add('show', 'online');
+      banner.classList.remove('offline');
+      banner.onclick = async () => {
+        showLoading('กำลัง sync...');
+        const r = await syncPendingSales(completeSale);
+        hideLoading();
+        if (r.synced) showToast(`Sync สำเร็จ ${r.synced} รายการ`, 'success');
+        if (r.failed) showToast(`Sync ไม่สำเร็จ ${r.failed} รายการ`, 'error');
+        update(true);
+        if (currentPage === 'dashboard') navigate('dashboard');
+      };
+    } else {
+      banner.classList.remove('show');
+      banner.onclick = null;
+    }
+  };
+  onConnectivityChange(update);
+  update(isOnline());
+}
+
+console.info(`[POSMATE] shell ready ${APP_VERSION}`);
