@@ -45,9 +45,6 @@ export function clearCart() {
   discount = { type: 'NONE', value: 0 };
 }
 
-/**
- * คำนวณยอดรวม
- */
 export function calcTotals() {
   const subtotal = cart.reduce((s, i) => s + i.lineTotal, 0);
   let discountAmount = 0;
@@ -62,27 +59,17 @@ export function calcTotals() {
   return { subtotal, discountAmount, total, itemCount };
 }
 
-/**
- * เพิ่มสินค้าเข้าตะกร้า (ตรวจ stock)
- */
 export function addToCart(product, qty = 1) {
   if (!product || !product.id) throw new Error('ไม่พบสินค้า');
   if (product.status === 'INACTIVE') throw new Error('สินค้านี้ถูกปิดการขาย');
-
   const stock = Number(product.stock) || 0;
   if (stock <= 0) throw new Error('สินค้าหมดสต็อก');
-
   const existing = cart.find(i => i.productId === product.id);
   const newQty = (existing ? existing.quantity : 0) + qty;
-
-  if (newQty > stock) {
-    throw new Error(`สต็อกไม่พอ (เหลือ ${stock} ${product.unit || 'ชิ้น'})`);
-  }
-
+  if (newQty > stock) throw new Error(`สต็อกไม่พอ (เหลือ ${stock} ${product.unit || 'ชิ้น'})`);
   const unitPrice = Number(product.sellPrice) || 0;
   const costPrice = Number(product.costPrice) || 0;
   const lineTotal = Math.round(unitPrice * newQty * 100) / 100;
-
   if (existing) {
     existing.quantity = newQty;
     existing.lineTotal = lineTotal;
@@ -107,13 +94,8 @@ export function setCartQty(productId, qty) {
   const item = cart.find(i => i.productId === productId);
   if (!item) return;
   qty = Math.floor(Number(qty) || 0);
-  if (qty <= 0) {
-    cart = cart.filter(i => i.productId !== productId);
-    return;
-  }
-  if (qty > item.stock) {
-    throw new Error(`สต็อกไม่พอ (เหลือ ${item.stock})`);
-  }
+  if (qty <= 0) { cart = cart.filter(i => i.productId !== productId); return; }
+  if (qty > item.stock) throw new Error(`สต็อกไม่พอ (เหลือ ${item.stock})`);
   item.quantity = qty;
   item.lineTotal = Math.round(item.unitPrice * qty * 100) / 100;
 }
@@ -126,16 +108,11 @@ export function setDiscount(type, value) {
   discount = { type: type || 'NONE', value: Number(value) || 0 };
 }
 
-/**
- * ค้นหาสินค้าสำหรับ POS
- */
 export async function searchProductsForPos(keyword) {
   const shopId = getCurrentShopId();
   const kw = String(keyword || '').trim();
   if (!kw) return [];
-  if (!isOnline()) {
-    return searchCachedProducts(kw);
-  }
+  if (!isOnline()) return searchCachedProducts(kw);
   try {
     const list = await listProducts(shopId, { search: kw, status: 'ACTIVE' });
     return (list || []).slice(0, 30);
@@ -145,16 +122,11 @@ export async function searchProductsForPos(keyword) {
   }
 }
 
-/**
- * หาสินค้าจาก barcode (online หรือ cache)
- */
 export async function findProductByBarcode(barcode) {
   const code = normalizeBarcode(barcode);
   if (!code) return null;
   const shopId = getCurrentShopId();
-  if (!isOnline()) {
-    return getCachedProductByBarcode(code);
-  }
+  if (!isOnline()) return getCachedProductByBarcode(code);
   try {
     return await getProductByBarcode(shopId, code);
   } catch (e) {
@@ -163,13 +135,19 @@ export async function findProductByBarcode(barcode) {
   }
 }
 
+export async function scanAndAdd(barcode) {
+  const code = normalizeBarcode(barcode);
+  if (!code) throw new Error('บาร์โค้ดว่าง');
+  const product = await findProductByBarcode(code);
+  if (!product) throw new Error('ไม่พบสินค้า: ' + code);
+  addToCart(product, 1);
+  return product;
+}
+
 export function normalizeBarcode(raw) {
   return String(raw || '').trim().replace(/\s+/g, '');
 }
 
-/**
- * โหลด html5-qrcode จาก CDN (ครั้งเดียว)
- */
 function loadHtml5Qrcode() {
   return new Promise((resolve, reject) => {
     if (window.Html5Qrcode) return resolve(window.Html5Qrcode);
@@ -181,9 +159,6 @@ function loadHtml5Qrcode() {
   });
 }
 
-/**
- * เปิดกล้องสแกน barcode
- */
 export async function startScanner(elementId, onDecode, options = {}) {
   if (scannerBusy) return;
   scannerBusy = true;
@@ -197,9 +172,8 @@ export async function startScanner(elementId, onDecode, options = {}) {
       { fps: 10, qrbox },
       async (decodedText) => {
         if (!scannerBusy) return;
-        try {
-          await onDecode(decodedText);
-        } catch (e) {
+        try { await onDecode(decodedText); }
+        catch (e) {
           console.warn(e);
           showToast(e.message || 'สแกนไม่สำเร็จ', 'error');
         }
@@ -217,28 +191,16 @@ export async function stopScanner() {
   if (!scannerInstance) return;
   try {
     const state = scannerInstance.getState && scannerInstance.getState();
-    // 2 = SCANNING, 3 = PAUSED
-    if (state === 2 || state === 3) {
-      await scannerInstance.stop();
-    }
-  } catch (e) {
-    console.warn('stopScanner', e);
-  }
-  try {
-    scannerInstance.clear();
-  } catch (e) {}
+    if (state === 2 || state === 3) await scannerInstance.stop();
+  } catch (e) { console.warn('stopScanner', e); }
+  try { scannerInstance.clear(); } catch (e) {}
   scannerInstance = null;
 }
 
-/**
- * สร้าง payload สำหรับบันทึกการขาย
- */
 export function buildCheckoutPayload(extra = {}) {
   const emp = getCurrentEmployee();
   const totals = calcTotals();
-  if (!cart.length) {
-    throw new Error('ไม่มีรายการสินค้า');
-  }
+  if (!cart.length) throw new Error('ไม่มีรายการสินค้า');
   return {
     transactionId: generateId('txn'),
     shopId: getCurrentShopId(),
@@ -260,8 +222,6 @@ export function buildCheckoutPayload(extra = {}) {
 
 export function requireEmployee() {
   const emp = getCurrentEmployee();
-  if (!emp) {
-    throw new Error('กรุณาเลือกพนักงาน / ใส่ PIN ก่อนขาย');
-  }
+  if (!emp) throw new Error('กรุณาเลือกพนักงาน / ใส่ PIN ก่อนขาย');
   return emp;
 }
